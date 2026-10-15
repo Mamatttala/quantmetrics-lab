@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build output
+dist/
+build/
+.vite/
+
+# Runtime data — canonical datasets and catalog are local state, never committed.
+# The directory names are the `DatasetCategory` values, which is what
+# `parquet_store.write_dataset` actually creates: an earlier revision of this file
+# listed `raw/`, `uploaded/` and `processed/`, which nothing has ever written to.
+backend/data/raw_data/
+backend/data/uploaded_data/
+backend/data/processed_data/
+backend/data/outputs/
+# `catalog.db-wal` and `catalog.db-shm` are not matched by `*.db`, and a WAL file
+# carries the full text of recently written pages — the dataset metadata this file
+# exists to keep out of the repository. They are present whenever a connection is
+# open, and absent after a clean close, so a `git add -A` catches them intermittently:
+# the one failure mode that is hardest to notice.
+backend/data/*.db
+backend/data/*.db-wal
+backend/data/*.db-shm
+*.parquet
+
+# Dev-server output. `tools/serve.py` writes both, and a uvicorn traceback is as likely
+# to quote a local path or a symbol as it is to be useful in the history.
+uvicorn.log
+frontend/vite.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local overrides
+.env
+.env.local

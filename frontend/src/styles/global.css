@@ -1,0 +1,512 @@
+/* Base element styles and shared component classes.
+ *
+ * Global rules per docs/redesign.md §6: flat surface colours (no gradients),
+ * thin scrollbars tinted toward gold on hover, a gold selection, and a single
+ * focusring treatment.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgba(212, 168, 67, 0.3);
+  color: var(--text);
+}
+
+button,
+input,
+select,
+textarea,
+a {
+  transition: all var(--transition);
+}
+
+/* ---------------------------------------------------------------- scrollbars */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-input) var(--bg-main);
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-gold);
+}
+
+/* ----------------------------------------------------------------- focus ring */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* -------------------------------------------------------------------- buttons
+ *
+ * Primary = flat gold fill with dark text; hover lifts it slightly and warms the
+ * fill. Note: button text is NOT set to uppercase via CSS. The e2e driver reads
+ * `innerText` (rendered text) and matches phrases case-sensitively, so a CSS
+ * uppercase transform would break it; the source text keeps its own case.
+ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent-gold);
+  color: var(--on-accent);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--accent-gold-hover);
+  transform: translateY(-1px) scale(1.02);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--accent-press);
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Secondary = gold outline on a transparent/slate fill. */
+.btn--ghost {
+  min-height: 44px;
+  padding: 10px 20px;
+  background: transparent;
+  border: 1px solid var(--accent-gold);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.btn--ghost:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-gold);
+  color: var(--text);
+  transform: scale(1.02);
+}
+
+.btn--ghost:active:not(:disabled) {
+  background: rgba(212, 168, 67, 0.2);
+}
+
+/* Small actions (grid paging, chart zoom, …). Kept shorter than the primary
+ * pair so a toolbar row does not become a stack of 44px slabs. */
+.btn--sm {
+  min-height: 32px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+}
+
+/* Icon / toolbar buttons — transparent, muted, gold on hover. */
+.btn--util {
+  background: transparent;
+  border: 1px solid var(--border-input);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.btn--util:hover:not(:disabled) {
+  background: var(--accent-dim);
+  border-color: var(--accent-gold);
+  color: var(--accent-gold);
+  transform: none;
+}
+
+.btn--danger {
+  min-height: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--danger);
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.btn--danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  transform: none;
+}
+
+/* A row of actions: the primary stretches, the rest sit right (§4.1). */
+.actions,
+.row > .btn:first-child {
+  flex: 0 1 auto;
+}
+
+/* --------------------------------------------------------------- forms
+ *
+ * §4.2: themed input surface (--bg-input), input border, gold focus ring via a dim
+ * gold halo rather than a hard outline.
+ */
+
+label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-code);
+  margin-bottom: 5px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="date"],
+input[type="datetime-local"],
+input[type="search"],
+select,
+textarea {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(212, 168, 67, 0.2);
+}
+
+input::placeholder {
+  color: var(--disabled);
+  font-style: italic;
+  opacity: 1;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+/* Dropdowns get a custom gold chevron (§4.2). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23d4a843' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* Checkboxes: custom 14px box with a gold fill and dark check when on (§4.2). */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  background: var(--checkbox-bg);
+  border: 1px solid var(--checkbox-border);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  vertical-align: -2px;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--control);
+  border-color: var(--control);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* Radios mirror the checkbox language: ring control, gold dot when on. */
+input[type="radio"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  background: var(--input-bg);
+  border: 1px solid var(--border-input);
+  border-radius: 50%;
+  cursor: pointer;
+  position: relative;
+  vertical-align: -2px;
+}
+
+input[type="radio"]:checked {
+  border-color: var(--accent);
+}
+
+input[type="radio"]:checked::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Sliders: gray track, purple fill/thumb, thumb grows on hover (§4.9). */
+input[type="range"] {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 4px;
+  background: var(--border-input);
+  border-radius: 2px;
+  outline-offset: 4px;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--control);
+  border: none;
+  transition: transform var(--transition);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--control);
+  border: none;
+  transition: transform var(--transition);
+}
+
+input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.2);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: var(--border-input);
+  border-radius: 2px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-code);
+  user-select: none;
+}
+
+.chip input {
+  margin: 0;
+}
+
+.chip:has(input:checked) {
+  border-color: var(--control);
+  color: var(--text);
+}
+
+/* -------------------------------------------------------------- page header */
+
+.page {
+  padding: 22px 26px 60px;
+  max-width: 1400px;
+}
+
+.page__title {
+  margin: 0 0 8px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.page__lead {
+  margin: 0 0 24px;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+/* Emphasis inside a lead is gold. Purple here would wrongly read as
+ * "interactive control". */
+.page__lead strong,
+.page__lead code {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.page__lead code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ------------------------------------------------------------- status / result
+ *
+ * §4.7: a flat bar on the sidebar surface, mono text; a colored border and text
+ * carry the status.
+ */
+
+.result__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  background: var(--bg-status);
+  border: 1px solid var(--border-grid);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-code);
+}
+
+.result__bar--ok {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: var(--ok);
+}
+
+.result__bar--error {
+  border-color: rgba(239, 68, 68, 0.55);
+  color: var(--danger);
+}
+
+/* ------------------------------------------------------------------ utilities */
+
+.muted {
+  color: var(--muted);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.field {
+  min-width: 150px;
+  flex: 1 1 150px;
+}
+/* ---------------------------------------------------- modals / dialogs (§ micro-UI)
+ *
+ * The app routes its one confirmation through the native `window.confirm`, which no
+ * stylesheet can reach; these are the shared primitives so a React dialog added
+ * later inherits the themed chrome instead of re-inventing it. Native `title`
+ * tooltips are likewise browser-drawn and cannot be styled — the custom InfoTip in
+ * data.css is the styled tooltip. */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--overlay);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: 12px;
+  box-shadow: var(--modal-shadow);
+}
+
+.modal__header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-card);
+}
+
+.modal__header h2,
+.modal__title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border-card);
+}

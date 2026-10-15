@@ -1,0 +1,1467 @@
+/* Styles for the data surfaces: preview table, metadata panel, editable grid,
+ * context menu, and the candlestick viewer.
+ *
+ * Everything numeric here is monospace with tabular figures — the spec's rule that
+ * any element carrying data must align column-to-column. The ag-Grid overrides
+ * exist so the grid reads as part of this application rather than as a bolted-on
+ * third-party widget. */
+
+/* ------------------------------------------------------------- section chrome
+ *
+ * §4.3: every major section is a card. The section head doubles as a collapse
+ * toggle (§3.2) — a chevron on the left, title in gold uppercase. Clicking the
+ * head toggles `.section--collapsed` (wired in Shell); the body then hides.
+ */
+
+.section {
+  margin: 0 0 16px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.section__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -20px -20px 12px;
+  padding: 12px 20px;
+  background: var(--card-head);
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section__title {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* In the clickable head the gap to the body is .section__head's own margin; a
+ * title that sits in the body (a sub-heading) supplies its own 12px. */
+.section__head > .section__title {
+  margin-bottom: 0;
+}
+
+.section__head::before {
+  content: "▾";
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  transition: transform var(--transition);
+}
+
+.section--collapsed .section__head {
+  margin-bottom: -20px;
+  border-bottom-color: transparent;
+  border-radius: var(--radius-lg);
+}
+
+.section--collapsed .section__head::before {
+  transform: rotate(-90deg);
+}
+
+.section--collapsed > :not(.section__head) {
+  display: none;
+}
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+}
+
+/* A panel inside a section card would double the frame — render it flat. */
+.section > .panel {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+/* -------------------------------------------------------------- metadata list */
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px 18px;
+}
+
+.meta__item {
+  min-width: 0;
+}
+
+.meta__key {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meta__value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+/* A field the schema declares but the provider does not populate. Marked rather
+ * than hidden: the column exists and is null, and saying so is the honest report. */
+.meta__value--unpopulated {
+  color: var(--warn);
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 6px;
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  color: var(--warn);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge--ok {
+  border-color: rgba(74, 222, 128, 0.5);
+  color: var(--ok);
+}
+
+/* ------------------------------------------------------------- preview table */
+
+.preview {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+}
+
+.preview table {
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.preview th,
+.preview td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preview thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel);
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+
+.preview td {
+  color: var(--text);
+}
+
+.preview td.is-null {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.preview tr:hover td {
+  background: var(--table-row-hover);
+}
+
+/* The gap between the last head row and the first tail row. Without it the two
+ * blocks read as one continuous table and a discontinuity looks like real data. */
+.preview__gap td {
+  padding: 3px 10px;
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-align: center;
+  background: var(--bg);
+}
+
+.preview__numeric {
+  text-align: right;
+}
+
+/* ------------------------------------------------------------- grid + toolbar */
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.grid__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 7px 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.grid__body {
+  height: 460px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* The ag-Grid surface, re-tinted onto the project's palette. `--ag-*` variables
+ * are the supported override surface; touching internal class names would break on
+ * a version bump. */
+.grid__body {
+  --ag-background-color: var(--card);
+  --ag-foreground-color: var(--text);
+  --ag-border-color: var(--border);
+  --ag-secondary-border-color: var(--border);
+  --ag-header-background-color: var(--panel);
+  --ag-header-foreground-color: var(--accent-strong);
+  --ag-odd-row-background-color: var(--grid-odd);
+  --ag-row-hover-color: var(--grid-row-hover);
+  --ag-selected-row-background-color: var(--grid-selected);
+  --ag-range-selection-border-color: var(--control);
+  --ag-input-focus-border-color: var(--accent);
+  --ag-font-family: var(--font-mono);
+  --ag-font-size: 12px;
+  --ag-grid-size: 5px;
+  --ag-cell-horizontal-padding: 10px;
+  --ag-borders: solid 1px;
+  --ag-wrapper-border-radius: 0;
+}
+
+.grid__body .ag-cell {
+  font-variant-numeric: tabular-nums;
+  line-height: 24px;
+}
+
+.grid__body .ag-header-cell-text {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Cells inside the tracked range selection. ag-Grid Community has no range
+ * selection of its own, so this is driven by the component's anchor/focus pair. */
+.grid__body .cell--selected {
+  background: var(--grid-cell-selected);
+  box-shadow: inset 0 0 0 1px var(--grid-cell-selected-border);
+}
+
+/* Unsaved edits. Colour alone would be ambiguous for a red/green colour-blind
+ * reader, so the left rule carries the same signal. */
+.grid__body .cell--dirty {
+  background: var(--grid-cell-dirty);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.grid__body .cell--new {
+  color: var(--control);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------- context menu */
+
+.ctxmenu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 190px;
+  padding: 4px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--popover-shadow);
+}
+
+.ctxmenu__item {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctxmenu__item:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+
+.ctxmenu__item:disabled {
+  color: var(--muted);
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ctxmenu__item--danger {
+  color: var(--danger);
+}
+
+.ctxmenu__item--danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.14);
+}
+
+.ctxmenu__sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* ------------------------------------------------------------ action rows */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 14px 0;
+}
+
+.actions__spacer {
+  flex: 1 1 auto;
+}
+
+/* ------------------------------------------------------------- chart viewer */
+
+.chart {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--chart-bg);
+  padding: 0;
+  overflow: hidden;
+}
+
+.chart__canvas {
+  width: 100%;
+}
+
+.chart__overlay {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 3;
+  padding: 6px 9px;
+  background: var(--chart-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  pointer-events: none;
+  line-height: 1.65;
+}
+
+.chart__overlay b {
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.chart__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 320px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Fullscreen: the chart leaves the page flow and fills the viewport. */
+.chart:fullscreen {
+  border-radius: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+/* Quality marker table under the chart. */
+.markers {
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.markers__row {
+  display: grid;
+  grid-template-columns: 160px 150px 1fr;
+  gap: 10px;
+  padding: 5px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.markers__kind {
+  color: var(--warn);
+}
+
+.markers__kind--extreme_return {
+  color: var(--control);
+}
+
+/* ============================================ Part B · preparation controls ===
+ *
+ * One block for both Cleaning (B3) and Resample & Merge (B4): they present the same
+ * kind of object — a list of mutually exclusive methodological choices, each with the
+ * consequence spelled out — and styling them differently would suggest a difference
+ * in kind that is not there.
+ */
+
+.policy {
+  margin: 0;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.policy[disabled] {
+  opacity: 0.55;
+}
+
+.policy__legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.policy__hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 88ch;
+}
+
+.policy__option {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  padding: 8px 9px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.policy__option:hover {
+  background: var(--raised-2);
+}
+
+/* Selected state is violet, matching every other checked control in the app. */
+.policy__option--on {
+  border-color: var(--control);
+  background: var(--raised-2);
+}
+
+.policy__option input {
+  margin: 3px 0 0;
+  flex: 0 0 auto;
+}
+
+.policy__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.policy__label {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.policy__detail {
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 84ch;
+}
+
+/* The consequence of a choice, in the warn colour rather than the danger colour:
+ * these options are not errors, they are the ones whose effect is invisible in the
+ * resulting frame. */
+.policy__caution {
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 84ch;
+  color: var(--warn);
+}
+
+/* Nested controls that belong to one group (the outlier column picker, the fence
+ * quantiles). Indented so they read as belonging to the option above them. */
+.policy__aside {
+  margin: 10px 0 0 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Column picker: a scrollable list of checkboxes, one per candidate column. */
+.columnpick {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.columnpick__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.columnpick__row:last-child {
+  border-bottom: 0;
+}
+
+.columnpick__row:hover {
+  background: var(--raised-2);
+}
+
+.columnpick__name {
+  font-family: var(--font-mono);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnpick__dtype,
+.columnpick__missing {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A number input that sits beside a label rather than filling a row. */
+.field--tight {
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+.field__note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+  font-family: var(--font-ui);
+}
+
+/* One join in the Resample & Merge list. */
+.join {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.join__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.join__label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  flex: 1 1 auto;
+}
+
+.join__options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+/* The report of what a step did, one line per step. */
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.report__row {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.report__key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.report__value {
+  color: var(--text);
+}
+
+.report__value--removed {
+  color: var(--warn);
+}
+
+/* A plain read-only table: the column inventory, the steps a plan applied, the
+ * outlier fences. Distinct from `.preview` (which is a dense numeric matrix and
+ * right-aligns by dtype) — these are short text-and-count tables. */
+.dtable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dtable th {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dtable td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  color: var(--text);
+}
+
+.dtable tr:last-child td {
+  border-bottom: 0;
+}
+
+.dtable tbody tr:hover td {
+  background: var(--raised-2);
+}
+
+/* The join cards already have a border; a fieldset inside one would be a box in a
+ * box, so the option groups sit flush within the card. */
+.join .policy {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+/* ============================================================ C5 · Features ==== */
+
+/* One catalogue group. The rows are a table without being a <table>: each row holds a
+ * variable number of controls, and a grid would force a column count on rows that do
+ * not have one. */
+.feature__group {
+  margin-bottom: 4px;
+}
+
+.feature__count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Feature cards: a four-column grid of dark rectangular buttons, per the design
+ * spec. `minmax(300px, 1fr)` yields four columns on a wide content area and folds
+ * to fewer on a narrow window instead of crushing the labels. */
+.feature {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.feature__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-grid);
+  border-radius: 6px;
+}
+
+.feature__row:hover {
+  background: var(--feature-hover);
+}
+
+/* Disabled is a colour change and not `opacity`: the reason printed below is the
+ * point of the row, and dimming it to the point of illegibility would hide the only
+ * thing that explains the state. */
+.feature__row--off {
+  background: var(--feature-off);
+}
+
+.feature__row--off .feature__label {
+  color: var(--muted);
+}
+
+.feature__pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 auto;
+  cursor: pointer;
+}
+
+.feature__pick input[type="checkbox"] {
+  accent-color: var(--control);
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.feature__row--off .feature__pick {
+  cursor: not-allowed;
+}
+
+.feature__label {
+  font-family: var(--font-code);
+  font-size: 13px;
+  color: var(--text-code);
+}
+
+.feature__produces {
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.feature__reason {
+  flex-basis: 100%;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--warn);
+  padding-left: 21px;
+}
+
+.feature__windows {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding-left: 21px;
+}
+
+.feature__tick {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.feature__tick input[type="checkbox"] {
+  accent-color: var(--control);
+  width: 13px;
+  height: 13px;
+}
+
+.feature__tick--off {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.feature__bars {
+  font-size: 10.5px;
+}
+
+.feature__custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.feature__input {
+  width: 72px;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+.feature__input:focus {
+  outline: 1px solid var(--control);
+  border-color: var(--control);
+}
+
+.feature__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--raised);
+  border: 1px solid var(--control);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.feature__chip:hover:not(:disabled) {
+  border-color: var(--danger);
+}
+
+.feature__keep {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.feature__keep input[type="checkbox"] {
+  accent-color: var(--control);
+  width: 14px;
+  height: 14px;
+}
+
+/* ------------------------------------------------ C5 · run + status (design spec)
+ *
+ * The primary action is the one bright element on the page: full width, bright
+ * gold, dark text. The secondary controls stack beneath it so the row reads top to
+ * bottom as primary-then-optional. */
+.feature__run {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.feature__run .btn {
+  width: 100%;
+}
+
+.feature__run .btn.btn--sm {
+  width: auto;
+  align-self: flex-start;
+}
+
+.feature__runprimary {
+  background: var(--accent-bright);
+  color: var(--on-accent);
+  min-height: 44px;
+  margin-top: 24px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.feature__runprimary:hover:not(:disabled) {
+  background: var(--accent-bright-hover);
+}
+
+.feature__status {
+  background: var(--bg-status);
+  border: 1px solid var(--border-grid);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-family: var(--font-code);
+  font-size: 13px;
+  color: var(--text-code);
+}
+
+/* The ℹ️ beside a feature. Violet is the existing "this is a control" colour, which
+ * is what it is: pressing it does not change the data, it changes what you know. */
+.infotip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.infotip__button {
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-style: italic;
+  line-height: 1;
+  color: var(--control);
+  background: transparent;
+  border: 1px solid var(--control);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.infotip__button:hover,
+.infotip__button[aria-expanded="true"] {
+  color: var(--on-accent);
+  background: var(--control);
+}
+
+/* An entry whose panel carries a caveat says so before it is opened. */
+.infotip__button--caution {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.infotip__button--caution:hover,
+.infotip__button--caution[aria-expanded="true"] {
+  color: var(--bg);
+  background: var(--warn);
+}
+
+.infotip__panel {
+  position: absolute;
+  top: 21px;
+  left: 0;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 330px;
+  padding: 9px 11px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: var(--bg-input);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius);
+  box-shadow: var(--tooltip-shadow);
+  color: var(--text-primary);
+}
+
+.infotip__formula {
+  color: var(--text);
+  font-size: 11.5px;
+  white-space: pre-wrap;
+}
+
+.infotip__detail {
+  color: var(--muted);
+}
+
+.infotip__caution {
+  color: var(--warn);
+}
+
+.infotip__meta {
+  font-size: 10.5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--border);
+}
+
+/* ===================================================== D1 · Regime detection
+ *
+ * The regime page reuses the panel/report/policy vocabulary the rest of the app is
+ * built from. What it adds is the gauge, the state swatch, and the small table the
+ * diagnostics are laid out in.
+ *
+ * Every colour here is a token. The five state colours are *not* invented in this
+ * stylesheet — they come from STATE_COLOUR in RegimePage.tsx, because Plotly needs the
+ * same literal strings to draw the traces and a second copy here would let the chart and
+ * the legend drift apart. CSS references them only for the swatch.
+ */
+
+.regime__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 18px;
+}
+
+.regime__annualisation {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* A warning is a caution the user may overrule; an error is a refusal. They are
+ * different colours because they are different things — a page that painted both amber
+ * would teach the user to click past the one that cannot be clicked past.
+ *
+ * Shared by D1, C6 and C7 rather than namespaced per page. It is the same sentence in the
+ * same position on every form — "the engine has something to say about your inputs" — and
+ * three copies would be three places for it to drift apart. */
+.regime__warning,
+.scaling__warning {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 7px 0 0;
+  line-height: 1.5;
+}
+
+.regime__warning--error,
+.scaling__warning--error {
+  color: var(--danger);
+}
+
+/* The gray-zone note is deliberately not the danger colour. A reading below the
+ * threshold is the model saying "no call", which is a normal and honest outcome — the
+ * one thing it is not is an error. */
+.regime__warning--grey {
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 10px;
+}
+
+.regime__gauges {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .regime__gauges {
+    grid-template-columns: 1fr;
+  }
+}
+
+.regime__gauge-state {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  padding: 6px 0 2px;
+}
+
+.regime__gauge-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--raised-2);
+  overflow: hidden;
+  margin: 8px 0 6px;
+}
+
+.regime__gauge-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width var(--transition);
+}
+
+.regime__gauge-value {
+  font-size: 18px;
+  color: var(--text);
+}
+
+/* The gray-zone card is dimmed rather than recoloured: the state colour still tells the
+ * user which state it is, and the dashed border says the call is provisional without
+ * overriding that. */
+.regime__gauge--grey {
+  border-style: dashed;
+}
+
+.regime__counts .report__key {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.regime__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+/* ---------------------------------------------------------- diagnostics */
+
+.regime__table {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.regime__table-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.regime__table-row:last-child {
+  border-bottom: none;
+}
+
+.regime__table-row:nth-child(odd) {
+  background: var(--raised-2);
+}
+
+.regime__table-key {
+  color: var(--muted);
+}
+
+.regime__table-value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.regime__ok {
+  color: var(--ok);
+}
+
+.regime__bad {
+  color: var(--danger);
+}
+
+/* An unavailable model reads as unavailable, not as a disabled control that the user
+ * might think they can enable by choosing another dataset. */
+.policy__option--off {
+  opacity: 0.55;
+}
+
+.feature__pick .badge {
+  font-size: 9.5px;
+}
+
+/* ================================================ C6 · chronological splits */
+
+/* The six date boundaries, laid out three to a row so the train/val/test triples read as
+ * pairs rather than as one undifferentiated list of six boxes. */
+.split__dates {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 10px 0 0 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.split__dates .field__note {
+  grid-column: 1 / -1;
+}
+
+/* Nested controls belonging to the chosen split type — the fold slider, the embargo and
+ * the purge. Indented like `.policy__aside` so they read as consequences of the option
+ * above them rather than as independent settings. */
+.split__derived {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  margin: 10px 0 0 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.split__derived .field {
+  max-width: 42ch;
+}
+
+/* Start and end instants are the widest thing on the page and the least interesting; the
+ * row count carries the index range underneath it in smaller type. */
+.split__table td {
+  font-size: 11.5px;
+  vertical-align: top;
+}
+
+.split__role {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+}
+
+.split__role--train {
+  color: var(--ok);
+}
+
+.split__role--val {
+  color: var(--warn);
+}
+
+.split__role--test {
+  color: var(--accent);
+}
+
+/* The timeline — a Gantt positioned by row index rather than by wall-clock time.
+ *
+ * The bar colours are the same three the swatches and the role column use, so train is
+ * green in all three places. They are solid rather than tinted on purpose: a bar is a
+ * claim about which rows a model may see, and a colour that needs a legend to be read is
+ * the wrong colour for it. */
+.timeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.timeline--empty {
+  font-size: 12px;
+  padding: 14px;
+}
+
+.timeline__legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.timeline__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline__swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+
+.timeline__swatch--train {
+  background: var(--ok);
+}
+
+.timeline__swatch--val {
+  background: var(--warn);
+}
+
+.timeline__swatch--test {
+  background: var(--accent);
+}
+
+.timeline__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timeline__lane {
+  display: grid;
+  grid-template-columns: 72px 1fr;
+  gap: 10px;
+  align-items: center;
+}
+
+.timeline__lane-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* The track is the whole dataset. Anything a span does not cover stays visible as
+ * background, which is how an embargo or a purge shows up at all. */
+.timeline__track {
+  position: relative;
+  height: 22px;
+  border-radius: var(--radius-sm);
+  background: var(--raised-2);
+  overflow: hidden;
+}
+
+.timeline__bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  overflow: hidden;
+  border-right: 1px solid var(--bg);
+}
+
+.timeline__bar--train {
+  background: var(--ok);
+}
+
+.timeline__bar--val {
+  background: var(--warn);
+}
+
+.timeline__bar--test {
+  background: var(--accent);
+}
+
+.timeline__bar-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--bg);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+/* ------------------------------------------------------------ C7 · scaling */
+
+/* The plan picker and the fold picker sit together: the fold only exists because the plan
+ * is a walk-forward one, so a wide gap between them would read as two decisions. */
+.scaling__plan {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: flex-start;
+  margin: 10px 0 0 26px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.scaling__plan .field {
+  min-width: 260px;
+  max-width: 56ch;
+  flex: 1 1 260px;
+}
+
+/* ============================================ E1 · volatility forecasting
+ *
+ * The page reuses the panel/policy/report vocabulary. What it adds is the settings grid
+ * — Module E has more independent controls than any page before it, and a wall of
+ * full-width fields would hide the two that are actually coupled (the walk-forward
+ * windows) among the ones that are not.
+ *
+ * The model colours are *not* invented here: they come from MODEL_COLOUR in
+ * VolatilityPage.tsx, because Plotly needs the same literal strings to draw the traces and
+ * a second copy here would let the swatch beside a table row drift from the line it
+ * labels. CSS references them only through the TSX.
+ */
+
+.vol__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+
+/* The family headings inside the model fieldset. A rule above each, because the two
+ * groups answer different cost questions and a reader scanning the list needs to see
+ * where "simple" ends. */
+.vol__family {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin: 14px 0 4px;
+}
+
+.vol__radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.vol__radio input {
+  margin-top: 3px;
+  flex: 0 0 auto;
+}
+
+.vol__path-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Same table shape as D1's diagnostics table, extended to more columns. It scrolls
+ * rather than squeezing: a nine-column metrics table at phone width would wrap every
+ * number onto two lines and make the columns unalignable. */
+.vol__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+  display: block;
+  overflow-x: auto;
+}
+
+.vol__table th,
+.vol__table td {
+  text-align: right;
+  padding: 6px 10px;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+.vol__table th:first-child,
+.vol__table td:first-child,
+.vol__table th:nth-child(2),
+.vol__table td:nth-child(2) {
+  text-align: left;
+}
+
+.vol__table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* The best value in a ranked column. Not a colour swap: a filled row would make the
+ * model look like it had won outright, and between two volatility models on a few
+ * hundred bars that is usually not something the numbers support. */
+.vol__best {
+  color: var(--ok);
+  font-weight: 600;
+}

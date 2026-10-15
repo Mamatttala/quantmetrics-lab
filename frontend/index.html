@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <!-- Apply the stored theme before first paint so a reload does not flash the
+         wrong theme. Inline and dependency-free; the React provider reads the same
+         `theme` key and takes over after mount. -->
+    <script>
+      (function () {
+        try {
+          var saved = window.localStorage.getItem("theme");
+          document.documentElement.setAttribute(
+            "data-theme",
+            saved === "light" ? "light" : "dark",
+          );
+        } catch (error) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <!-- Inline rather than a file in `public/`, which does not exist here. Without a declared
+         icon the browser asks the server for `/favicon.ico` on every load; the dev server has
+         no such route, so each page view logged a 404 in the console alongside whatever the
+         page actually did — noise that the UI driver printed on every run and that made a
+         clean run look like it had failed a request. Three bars, because this is a charting
+         tool. Colours are `rgb()` and not hex on purpose: `#` inside a data URI is a fragment
+         delimiter and would have to be percent-encoded. -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='rgb(17,24,39)'/><rect x='7' y='17' width='4' height='9' rx='1' fill='rgb(96,165,250)'/><rect x='14' y='11' width='4' height='15' rx='1' fill='rgb(52,211,153)'/><rect x='21' y='6' width='4' height='20' rx='1' fill='rgb(251,191,36)'/></svg>"
+    />
+    <title>Quantmetrics Lab</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

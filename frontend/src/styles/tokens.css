@@ -1,0 +1,271 @@
+/* Quantmetrics Lab - design tokens.
+ *
+ * Two layers:
+ *
+ *  1. The canonical theme palette (--bg-main, --text-primary, --accent-gold, ...).
+ *     :root holds the dark values; [data-theme="light"] on <html> swaps in the
+ *     light values. A theme switch is one attribute change, not a rebuild.
+ *  2. Compatibility aliases (--bg, --card, --muted, ...) that the component CSS
+ *     references. They point at the canonical variables, so they follow the theme
+ *     automatically and no component had to be renamed to ship light mode.
+ *
+ * Rules:
+ *  - Components must not hardcode a hex value. Reference a variable so both
+ *    themes stay correct.
+ *  - Theme-scoped extras (card head, explorer surfaces, checkbox chrome, grid
+ *    washes) are declared per theme below the canonical block.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ---------------------------------------------------- canonical palette */
+  --bg-main: #111111;
+  --bg-sidebar: #1a1a1a;
+  --bg-explorer: #111827;
+  --bg-card: #1c1c1c;
+  --bg-input: #0f172a;
+  --bg-chart: #0b0f19;
+  --bg-status: #0f172a;
+  --bg-hover: #222222;
+  --bg-selected: #2a4a6b;
+
+  --text-primary: #f0f0f0;
+  --text-secondary: #a0a0a0;
+  --text-muted: #64748b;
+  --text-code: #cbd5e1;
+
+  --accent-gold: #d4a843;
+  --accent-gold-hover: #eab308;
+  --accent-purple: #a855f7;
+
+  --border-card: #2a2a2a;
+  --border-input: #334155;
+  --border-explorer: #1e293b;
+  --border-inactive: #334155;
+  --border-grid: #1e293b;
+
+  --chart-grid: #1e293b;
+  --chart-zero: #334155;
+  --chart-axis: #64748b;
+
+  /* ---------------------------------------------- theme-scoped extras (dark) */
+  --card-head: #202020;
+  --raised: #1c1c1c;
+  --raised-2: #222222;
+  --accent-press: #b48a2b;
+  --accent-bright: #fbbf24;
+  --accent-bright-hover: #fcd34d;
+  --accent-dim: rgba(212, 168, 67, 0.15);
+  --on-accent: #0f172a;
+  --nav-hover-border: #555555;
+  --nav-active-bg: #252520;
+  --nav-active-text: #f0f0f0;
+  --toggle-bg: #1e293b;
+  --toggle-border: #334155;
+  --toggle-icon: #fbbf24;
+  --checkbox-bg: transparent;
+  --checkbox-border: #64748b;
+  --feature-hover: #14213a;
+  --feature-off: #12182a;
+  --table-row-hover: rgba(255, 255, 255, 0.03);
+  --chart-overlay: rgba(13, 13, 13, 0.82);
+  --popover-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  --tooltip-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --modal-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  --overlay: rgba(0, 0, 0, 0.5);
+
+  /* Explorer surfaces. The pane is deliberately a navy family rather than the
+   * neutral chrome; the light block gives it a slate family instead. */
+  --explorer-head: #162032;
+  --explorer-hover: #1e293b;
+  --explorer-sel-bg: #2a4a6b;
+  --explorer-sel-border: #2a4a6b;
+  --explorer-sel-text: #ffffff;
+  --explorer-item: #94a3b8;
+  --explorer-item-parent: #e2e8f0;
+  --explorer-text: #cbd5e1;
+  --explorer-text-strong: #f8fafc;
+  --explorer-chevron: #64748b;
+  --explorer-title: #94a3b8;
+  --explorer-btn-border: #e2e8f0;
+  --explorer-scroll: #334155;
+  --explorer-scroll-hover: #475569;
+
+  /* ag-Grid washes, fed into the grid's own --ag-* variables in data.css. */
+  --grid-odd: rgba(255, 255, 255, 0.014);
+  --grid-row-hover: rgba(212, 168, 67, 0.07);
+  --grid-selected: rgba(139, 92, 246, 0.16);
+  --grid-cell-selected: rgba(139, 92, 246, 0.18);
+  --grid-cell-selected-border: rgba(139, 92, 246, 0.5);
+  --grid-cell-dirty: rgba(212, 168, 67, 0.12);
+
+  /* ------------------------------------------------------------- semantic */
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #ef4444;
+  --info: #60a5fa;
+
+  /* -------------------------------------------------------- chart furniture */
+  --grid: var(--chart-grid);
+  --cloud: rgba(136, 136, 136, 0.2);
+  --band: rgba(136, 136, 136, 0.15);
+
+  /* ------------------------------------ compatibility aliases (theme-aware) */
+  --bg: var(--bg-main);
+  --panel: var(--bg-sidebar);
+  --card: var(--bg-card);
+  --input-bg: var(--bg-input);
+  --chart-bg: var(--bg-chart);
+  --border: var(--border-card);
+  --divider: var(--border-card);
+
+  --text: var(--text-primary);
+  --text-2: var(--text-secondary);
+  --muted: var(--text-secondary);
+  --disabled: var(--text-muted);
+
+  --accent: var(--accent-gold);
+  --accent-strong: var(--accent-gold-hover);
+  --control: var(--accent-purple);
+  --nav-active-border: var(--accent-gold);
+
+  --explorer-bg: var(--bg-explorer);
+  --explorer-border: var(--border-explorer);
+
+  /* --------------------------------------------------------------- spacing */
+  --sp-xs: 4px;
+  --sp-sm: 8px;
+  --sp-md: 12px;
+  --sp-lg: 16px;
+  --sp-xl: 20px;
+  --sp-2xl: 24px;
+
+  /* ----------------------------------------------------------------- radii */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  --font-ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-code: "Fira Code", "Consolas", ui-monospace, monospace;
+
+  /* ---------------------------------------------------------- pane widths */
+  --pane-sidebar: 220px;
+  --pane-sidebar-collapsed: 52px;
+  --pane-explorer: 280px;
+
+  --transition: 0.2s ease;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  --bg-main: #ffffff;
+  --bg-sidebar: #f8f9fa;
+  --bg-explorer: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-input: #f8f9fa;
+  --bg-chart: #ffffff;
+  --bg-status: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --bg-selected: #dbeafe;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-code: #334155;
+
+  --accent-gold: #b8860b;
+  --accent-gold-hover: #d4a843;
+  --accent-purple: #9333ea;
+
+  --border-card: #e2e8f0;
+  --border-input: #cbd5e1;
+  --border-explorer: #cbd5e1;
+  --border-inactive: #cbd5e1;
+  --border-grid: #e2e8f0;
+
+  --chart-grid: #e2e8f0;
+  --chart-zero: #cbd5e1;
+  --chart-axis: #64748b;
+
+  --card-head: #f1f5f9;
+  --raised: #ffffff;
+  --raised-2: #f1f5f9;
+  --accent-press: #9a6f1f;
+  --accent-bright: #d4a843;
+  --accent-bright-hover: #b8860b;
+  --on-accent: #0f172a;
+  --nav-hover-border: #94a3b8;
+  --nav-active-bg: #fef3c7;
+  --nav-active-text: #0f172a;
+  --toggle-bg: #e2e8f0;
+  --toggle-border: #cbd5e1;
+  --toggle-icon: #64748b;
+  --checkbox-bg: #ffffff;
+  --checkbox-border: #cbd5e1;
+  --feature-hover: #e8eef7;
+  --feature-off: #eef2f7;
+  --table-row-hover: #f1f5f9;
+  --chart-overlay: rgba(255, 255, 255, 0.92);
+  --popover-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  --overlay: rgba(0, 0, 0, 0.3);
+
+  --explorer-head: #e2e8f0;
+  --explorer-hover: #e2e8f0;
+  --explorer-sel-bg: #dbeafe;
+  --explorer-sel-border: #dbeafe;
+  --explorer-sel-text: #0f172a;
+  --explorer-item: #475569;
+  --explorer-item-parent: #0f172a;
+  --explorer-text: #334155;
+  --explorer-text-strong: #0f172a;
+  --explorer-chevron: #64748b;
+  --explorer-title: #64748b;
+  --explorer-btn-border: #cbd5e1;
+  --explorer-scroll: #cbd5e1;
+  --explorer-scroll-hover: #94a3b8;
+
+  --grid-odd: rgba(15, 23, 42, 0.02);
+  --grid-row-hover: rgba(184, 134, 11, 0.08);
+  --grid-selected: rgba(147, 51, 234, 0.12);
+  --grid-cell-selected: rgba(147, 51, 234, 0.14);
+  --grid-cell-selected-border: rgba(147, 51, 234, 0.45);
+  --grid-cell-dirty: rgba(184, 134, 11, 0.14);
+
+  --ok: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+
+  --cloud: rgba(100, 116, 139, 0.18);
+  --band: rgba(100, 116, 139, 0.14);
+}
+
+/* Any element carrying data must be monospaced and tabular so digits line up
+ * column-to-column. Applied via the .mono utility and by the component styles. */
+.mono,
+[data-mono] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "zero" 1;
+}
+
+/* Theme changes animate the three colour channels only; geometry keeps its own
+ * component transitions. */
+*,
+*::before,
+*::after {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

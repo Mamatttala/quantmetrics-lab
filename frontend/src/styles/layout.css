@@ -1,0 +1,613 @@
+/* Three-pane shell: [Sidebar] [Data Explorer] [Main]. Each pane scrolls
+ * independently; the page itself never scrolls as a whole.
+ *
+ * Pane and item styling per docs/redesign.md §3 and §4.4–4.5.
+ */
+
+.shell {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.shell__pane {
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ------------------------------------------------------------------- sidebar */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--pane-sidebar);
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  transition: width 0.3s ease;
+}
+
+.sidebar--collapsed {
+  width: var(--pane-sidebar-collapsed);
+}
+
+.sidebar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--divider);
+  flex: 0 0 auto;
+}
+
+/* App title: gold, uppercase, bold (§2.2). */
+.sidebar__brand {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar--collapsed .sidebar__brand {
+  display: none;
+}
+
+/* Collapsed rail: the two header controls stack so both stay inside 52px. */
+.sidebar--collapsed .sidebar__header {
+  flex-direction: column;
+  padding: 10px 6px;
+  gap: 6px;
+}
+
+.sidebar--collapsed .sidebar__header-actions {
+  flex-direction: column;
+}
+
+.sidebar__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sidebar__collapse {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.sidebar__collapse:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.sidebar__nav {
+  padding: 8px 0 24px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+
+/* Group separators stay visible in both states; headings appear only expanded. */
+.sidebar__group + .sidebar__group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--divider);
+}
+
+/* Subsection heading: uppercase gold (§2.2). */
+.sidebar__heading {
+  padding: 10px 14px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.85;
+}
+
+.sidebar--collapsed .sidebar__heading {
+  display: none;
+}
+
+/* Nav items (§4.4): radius 6, a transparent 3px left rail that turns gold when
+ * active. */
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.navitem:hover {
+  background: var(--bg-hover);
+  border-color: var(--nav-hover-border);
+}
+
+.sidebar--collapsed .navitem {
+  justify-content: center;
+  margin: 6px;
+  padding: 10px 6px;
+}
+
+/* Shortcut letter square: gold letter in a gold-bordered rounded square. */
+.navitem__badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--accent-gold);
+  border-radius: 4px;
+  background: transparent;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--accent-gold);
+}
+
+.navitem__label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar--collapsed .navitem__label {
+  display: none;
+}
+
+.navitem--active {
+  background: var(--nav-active-bg);
+  border-color: var(--nav-active-border);
+  color: var(--nav-active-text);
+}
+
+.navitem--active .navitem__badge {
+  background: var(--accent-gold);
+  border-color: var(--accent-gold);
+  color: var(--on-accent);
+}
+
+/* ------------------------------------------------------------- data explorer
+ *
+ * Dark navy/slate-blue tree panel (redesign spec). The palette here is
+ * deliberately blue rather than the neutral grey of the rest of the chrome:
+ * #111827 reads as "navy", and the selected row is the distinct muted blue
+ * #2a4a6b so selection never reads as the gold accent.
+ */
+
+.explorer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: var(--pane-explorer);
+  min-width: 200px;
+  max-width: 500px;
+  height: 100vh;
+  background: var(--explorer-bg);
+  border-left: 1px solid var(--explorer-border);
+  border-right: 1px solid var(--explorer-border);
+  color: var(--explorer-text);
+  font-family: var(--font-ui);
+  /* No `width` transition: this pane is drag-resized, and animating the width makes
+   * the handle lag the pointer. Hiding is an unmount, so it does not need one either. */
+}
+
+.explorer--hidden {
+  width: 0;
+  min-width: 0;
+  border-right: none;
+  overflow: hidden;
+}
+
+/* Header: title + the four outline controls [Upload][Hide][Delete][Refresh]. */
+.explorer__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  min-height: 40px;
+  padding: 6px 12px;
+  background: var(--explorer-head);
+  border-bottom: 1px solid var(--explorer-border);
+  flex: 0 0 auto;
+}
+
+.explorer__title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--explorer-title);
+  white-space: nowrap;
+}
+
+.explorer__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Empty rounded-rectangle buttons: transparent fill, thin border, plain text. */
+.explorer__btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--explorer-btn-border);
+  border-radius: 6px;
+  color: var(--explorer-text-strong);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition),
+    color var(--transition);
+}
+
+.explorer__btn:hover:not(:disabled) {
+  background: var(--explorer-hover);
+  border-color: var(--explorer-btn-border);
+  color: var(--explorer-text-strong);
+}
+
+.explorer__btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.explorer__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Tree --------------------------------------------------------------------- */
+
+.explorer__body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 8px 0 20px;
+  scrollbar-color: var(--border-input) var(--bg-explorer);
+  scrollbar-width: thin;
+}
+
+.explorer__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.explorer__body::-webkit-scrollbar-track {
+  background: var(--explorer-bg);
+}
+
+.explorer__body::-webkit-scrollbar-thumb {
+  background: var(--border-input);
+  border-radius: 4px;
+}
+
+.explorer__body::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-gold);
+}
+
+.explorer__group {
+  margin-bottom: 2px;
+}
+
+/* Parent node: chevron + category label + count. */
+.explorer__grouphead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: calc(100% - 12px);
+  margin: 1px 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--explorer-item-parent);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.explorer__grouphead:hover {
+  background: var(--explorer-hover);
+  color: var(--explorer-text-strong);
+}
+
+.explorer__chevron {
+  flex: 0 0 auto;
+  display: inline-block;
+  width: 10px;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--explorer-chevron);
+  transition: transform 0.2s ease;
+}
+
+.explorer__chevron--open {
+  transform: rotate(90deg);
+}
+
+.explorer__grouplabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.explorer__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--explorer-chevron);
+}
+
+/* Children collapse with a smooth height transition. `grid-template-rows`
+ * animates to the content's natural height, where a fixed `max-height` would
+ * clip a long category or leave dead space under a short one. */
+.explorer__children {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.explorer__children--open {
+  grid-template-rows: 1fr;
+}
+
+.explorer__childreninner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Leaf node: one 16px level in. The row is a div rather than a button so its
+ * navigation target and its action buttons are valid, independently clickable
+ * interactive elements. */
+.explorer__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: calc(100% - 12px);
+  margin: 1px 6px;
+  border-radius: 4px;
+  transition: background var(--transition), color var(--transition);
+  cursor: pointer;
+}
+
+.explorer__row:hover {
+  background: var(--explorer-hover);
+}
+
+.explorer__row--selected {
+  background: var(--explorer-sel-bg);
+}
+
+.explorer__item {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 12px 4px 28px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--explorer-item);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 400;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+}
+
+.explorer__item:hover {
+  color: var(--explorer-text-strong);
+}
+
+.explorer__item--selected {
+  background: var(--explorer-sel-bg);
+  color: var(--explorer-sel-text);
+  font-weight: 500;
+}
+
+.explorer__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 1px 8px 5px 28px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.explorer__quick {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--control);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-decoration: underline dotted;
+}
+
+.explorer__quick:hover {
+  color: var(--accent-strong);
+}
+
+.explorer__action-spacer {
+  flex: 1 1 auto;
+  min-width: 4px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--explorer-text-strong);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  background: var(--explorer-hover);
+  border-color: var(--explorer-btn-border);
+}
+
+.icon-btn.danger {
+  color: var(--danger);
+}
+
+.icon-btn.danger:hover {
+  border-color: var(--danger);
+}
+
+.explorer__empty {
+  padding: 10px 12px;
+  color: var(--explorer-chevron);
+  font-size: 12px;
+}
+
+/* Drag handle on the right edge. The hit area is wider than the visible line so
+ * it is grabbable without a pixel hunt. */
+.explorer__resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.explorer__resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 1px;
+  height: 100%;
+  background: transparent;
+  transition: background var(--transition);
+}
+
+.explorer__resize:hover::after {
+  background: var(--explorer-sel-bg);
+}
+
+/* Handle that restores a hidden explorer. Occupies the gutter between the
+ * sidebar and main so it is always reachable. */
+.explorer-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 100vh;
+  background: var(--explorer-bg);
+  border-right: 1px solid var(--explorer-border);
+  color: var(--explorer-chevron);
+  cursor: pointer;
+  padding: 0;
+}
+
+.explorer-handle:hover {
+  color: var(--explorer-text-strong);
+  background: var(--explorer-head);
+}
+
+/* ------------------------------------------------------------ theme toggle
+ *
+ * 32x32 rounded square in the explorer header. Dark shows a sun, light a moon. */
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--toggle-border);
+  border-radius: 8px;
+  background: var(--toggle-bg);
+  color: var(--toggle-icon);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  transform: scale(1.1);
+}
+
+/* ------------------------------------------------------------------- main */
+
+.main {
+  background: transparent;
+}
+
+/* --------------------------------------------------------------- responsive
+ *
+ * §11: on narrow viewports the two fixed panes give their width back to the main
+ * content. The sidebar folds to its letter-badge rail and the explorer stops
+ * growing. This is CSS-only so it applies even when the persisted React state says
+ * "expanded" â€” a phone/tablet width cannot honour a 220 + 280 pane budget. */
+@media (max-width: 1180px) {
+  .explorer {
+    max-width: 240px;
+  }
+}
+
+@media (max-width: 960px) {
+  .sidebar {
+    width: var(--pane-sidebar-collapsed);
+  }
+
+  .sidebar .sidebar__brand,
+  .sidebar .sidebar__heading,
+  .sidebar .navitem__label {
+    display: none;
+  }
+
+  .sidebar .navitem {
+    justify-content: center;
+    padding: 10px 6px;
+  }
+}

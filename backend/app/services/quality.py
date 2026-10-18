@@ -86,15 +86,12 @@ def find_time_column_in(names: pd.Index | list[str] | tuple[str, ...]) -> str | 
     """`find_time_column` for a bare list of column names.
 
     The candlestick viewer reads its schema from the catalog before it opens the
-    Parquet file, so it has names but no frame. Matching case-insensitively keeps a
-    capitalised `Date` from an equity file working the same as a lower-case `date`.
+    Parquet file, so it has names but no frame. Exact names are checked first in the
+    declared priority order. A case-insensitive fallback is accepted only when one
+    column matches; silently choosing one side of a case collision would make the
+    timeline depend on dictionary insertion order.
     """
-    lowered = {str(name).lower(): str(name) for name in names}
-    for candidate in TIME_COLUMN_CANDIDATES:
-        actual = lowered.get(candidate.lower())
-        if actual is not None:
-            return actual
-    return None
+    return _resolve_column_name(names, TIME_COLUMN_CANDIDATES)
 
 
 #: The OHLCV vocabulary, mapped to the fields the candlestick viewer and the price
@@ -107,16 +104,59 @@ OHLCV_FIELDS: tuple[str, ...] = ("open", "high", "low", "close", "volume")
 def resolve_ohlcv(names: pd.Index | list[str] | tuple[str, ...]) -> dict[str, str]:
     """Map the lower-case OHLCV field names onto the dataset's actual column names.
 
-    Returns only the fields that are present. Case-insensitive so that `Open` and
-    `open` are both recognised; the stored names are never rewritten.
+    Returns only the fields that are present. Case-insensitive aliases such as `Open`
+    are accepted when unambiguous, but a field with both `Open` and `open` is refused
+    instead of allowing the later dictionary entry to win.
     """
-    lowered = {str(name).lower(): str(name) for name in names}
     resolved: dict[str, str] = {}
     for field in OHLCV_FIELDS:
-        actual = lowered.get(field)
+        # OHLCV fields have one canonical lower-case candidate rather than the explicit
+        # `Date`/`date` priority pair. Therefore an exact `open` does not disambiguate a
+        # second `Open` alias: both names still claim the same semantic field.
+        actual = _resolve_column_name(names, (field,), detect_exact_collisions=True)
         if actual is not None:
             resolved[field] = actual
     return resolved
+
+
+def _resolve_column_name(
+    names: pd.Index | list[str] | tuple[str, ...],
+    candidates: tuple[str, ...],
+    *,
+    detect_exact_collisions: bool = False,
+) -> str | None:
+    """Resolve one semantic column with exact priority and safe aliases.
+
+    The exact pass is separate from the fallback pass on purpose. For timestamps the
+    candidate tuple contains both `Date` and `date`, so a frame carrying both must use
+    the first exact candidate rather than being rejected as an alias collision. OHLCV
+    has only one canonical candidate per field; its caller enables collision detection
+    even when that canonical spelling is present beside a differently-cased alias.
+    """
+    actual_names = [str(name) for name in names]
+
+    for candidate in candidates:
+        exact_matches = [name for name in actual_names if name == candidate]
+        if exact_matches:
+            if detect_exact_collisions:
+                aliases = [name for name in actual_names if name.lower() == candidate.lower()]
+                if len(aliases) > 1:
+                    raise ValueError(
+                        f"Ambiguous column resolution for '{candidate}': found {aliases}. "
+                        "Please rename to disambiguate."
+                    )
+            return exact_matches[0]
+
+    for candidate in candidates:
+        matches = [name for name in actual_names if name.lower() == candidate.lower()]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"Ambiguous column resolution for '{candidate}': found {matches}. "
+                "Please rename to disambiguate."
+            )
+    return None
 
 
 def has_intraday_pattern(frame: pd.DataFrame, time_column: str | None) -> bool | None:

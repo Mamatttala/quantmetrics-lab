@@ -149,7 +149,9 @@ if __name__ == "__main__":
     if "--stop" in sys.argv:
         for pattern, label in (("uvicorn*app.main", "api"), ("vite", "web")):
             for pid in pids_matching(pattern):
-                subprocess.run(["taskkill", "/PID", pid, "/F", "/T"], capture_output=True, check=False)
+                subprocess.run(
+                    ["taskkill", "/PID", pid, "/F", "/T"], capture_output=True, check=False
+                )
                 print(f"stopped {label} pid {pid}")
         print("stopped")
         sys.exit(0)

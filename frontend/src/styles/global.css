@@ -232,14 +232,24 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
-/* Dropdowns get a custom gold chevron (§4.2). */
+/* Dropdowns get a custom chevron whose colour follows the active theme. A CSS
+ * gradient is used instead of a data-URI SVG because CSS variables do not
+ * inherit into the SVG document embedded in a URL. */
 select {
   appearance: none;
   -webkit-appearance: none;
   padding-right: 30px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23d4a843' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--accent-dim) 50%),
+    linear-gradient(135deg, var(--accent-dim) 50%, transparent 50%);
   background-repeat: no-repeat;
-  background-position: right 10px center;
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+}
+
+/* Inline SVG select arrows use the same token as the native select chevron. */
+.select-arrow {
+  stroke: var(--accent-dim);
 }
 
 /* Checkboxes: custom 14px box with a gold fill and dark check when on (§4.2). */

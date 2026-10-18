@@ -23,6 +23,33 @@ def counts(report: dict) -> dict:
     return report["counts"]
 
 
+def test_time_resolution_prefers_the_first_exact_candidate() -> None:
+    assert quality.find_time_column_in(["Date", "date"]) == "Date"
+
+
+def test_ohlcv_resolution_accepts_one_case_insensitive_alias() -> None:
+    assert quality.resolve_ohlcv(["OPEN"]) == {"open": "OPEN"}
+
+
+def test_ohlcv_resolution_rejects_case_collisions() -> None:
+    with pytest.raises(ValueError, match="Ambiguous column resolution for 'open'") as error:
+        quality.resolve_ohlcv(["Open", "open"])
+
+    assert "found ['Open', 'open']" in str(error.value)
+    assert "Please rename to disambiguate." in str(error.value)
+
+
+def test_ohlcv_resolution_maps_capitalised_equity_columns() -> None:
+    names = ["Date", "Open", "High", "Low", "Close", "Volume"]
+    assert quality.resolve_ohlcv(names) == {
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "volume": "Volume",
+    }
+
+
 def test_a_clean_series_produces_no_markers() -> None:
     """A count that is present and zero means "checked, nothing found". An absent count
     means "not checked". Both are reported, so this asserts the distinction rather than

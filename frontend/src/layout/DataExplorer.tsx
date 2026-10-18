@@ -97,7 +97,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
 
   // The shell mounts this pane once, so a fetch or derive performed in the main pane
   // would leave the list stale until Refresh was pressed. This pane's own mutations
-  // (upload, delete all) refresh directly and do not need the signal.
+  // (upload, per-row mutations, delete all) refresh directly and do not need the signal.
   useEffect(() => subscribeToDatasets(() => void refresh()), [refresh]);
 
   useEffect(() => {

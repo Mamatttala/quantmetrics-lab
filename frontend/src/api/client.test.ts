@@ -27,8 +27,13 @@ describe("dataset mutation client methods", () => {
     );
   });
 
-  it("deletes one dataset and accepts the backend's empty 204 response", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  it("deletes one dataset and accepts the backend's 200 response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ deleted: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await api.deleteDataset("dataset-1");

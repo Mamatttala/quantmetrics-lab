@@ -8,6 +8,7 @@ they are validated at the boundary.
 from __future__ import annotations
 
 import io
+from contextlib import suppress
 from typing import Any, Literal
 
 import pandas as pd
@@ -30,6 +31,7 @@ from app.models.enums import (
     Provider,
     Timeframe,
 )
+from app.services import quality as quality_checks
 from app.services.cleaning import CleaningPlan
 from app.services.datasets import CellEdit, ColumnOp, DatasetService
 from app.services.features import FeatureRequest, Selection
@@ -42,6 +44,29 @@ router = APIRouter(prefix="/datasets", tags=["datasets"])
 
 def _service() -> DatasetService:
     return DatasetService()
+
+
+def _coerce_upload_timestamps(frame: pd.DataFrame) -> None:
+    """Parse timestamp-named CSV columns before they enter canonical storage.
+
+    ``read_csv`` intentionally leaves values as strings. Resolving each name through
+    the shared quality resolver keeps the accepted vocabulary in one place while still
+    allowing a CSV to carry more than one timestamp-named column. A column that is
+    merely named like a timestamp but contains labels is left as text: an upload should
+    not fail just because a user used ``Date`` for a non-date field.
+    """
+    timestamp_columns = [
+        column
+        for column in frame.columns
+        if quality_checks.find_time_column_in([str(column)]) is not None
+    ]
+    for column in timestamp_columns:
+        with suppress(ValueError, TypeError):
+            frame[column] = pd.to_datetime(
+                frame[column],  # type: ignore[call-overload]
+                infer_datetime_format=True,
+                utc=True,
+            )
 
 
 # ------------------------------------------------------------------- responses
@@ -250,10 +275,10 @@ async def rename_dataset_action(dataset_id: str, body: RenameRequest) -> Dataset
     return await _service().rename(dataset_id, body.name)
 
 
-@router.delete("/{dataset_id}", status_code=204)
-async def delete_dataset(dataset_id: str) -> Response:
+@router.delete("/{dataset_id}")
+async def delete_dataset(dataset_id: str) -> dict[str, bool]:
     await _service().delete(dataset_id)
-    return Response(status_code=204)
+    return {"deleted": True}
 
 
 @router.post("/{dataset_id}/derive", response_model=DatasetMeta, status_code=201)
@@ -428,6 +453,8 @@ async def upload_csv(file: UploadFile = File(...)) -> DatasetMeta:
 
         if frame.empty:
             raise ValidationFailure("The uploaded CSV has a header but no rows.")
+
+        _coerce_upload_timestamps(frame)
 
         dataset_id = parquet_store.new_dataset_id()
         written = parquet_store.write_dataset(

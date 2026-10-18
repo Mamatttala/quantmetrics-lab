@@ -197,6 +197,7 @@
   --accent-press: #9a6f1f;
   --accent-bright: #d4a843;
   --accent-bright-hover: #b8860b;
+  --accent-dim: #b8941f;
   --on-accent: #0f172a;
   --nav-hover-border: #94a3b8;
   --nav-active-bg: #fef3c7;
@@ -211,6 +212,8 @@
   --table-row-hover: #f1f5f9;
   --chart-overlay: rgba(255, 255, 255, 0.92);
   --popover-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  --tooltip-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --modal-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   --overlay: rgba(0, 0, 0, 0.3);
 
   --explorer-head: #e2e8f0;

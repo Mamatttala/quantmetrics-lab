@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/api/client";
@@ -28,9 +28,14 @@ function renderExplorer(): void {
     <MemoryRouter initialEntries={["/data"]}>
       <ThemeProvider>
         <DataExplorer onHide={vi.fn()} />
+        <LocationProbe />
       </ThemeProvider>
     </MemoryRouter>,
   );
+}
+
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
 }
 
 describe("DataExplorer dataset actions", () => {
@@ -77,5 +82,20 @@ describe("DataExplorer dataset actions", () => {
     });
     expect(window.prompt).toHaveBeenCalledWith("New name", "BTC hourly");
     expect(api.listDatasets).toHaveBeenCalledTimes(2);
+  });
+
+  it("opens the raw view, cleaning, and merge pages without row navigation", async () => {
+    renderExplorer();
+    await screen.findByText("BTC hourly");
+
+    const quickActions = [
+      ["Open in Raw Data View (A2)", "/view/dataset-1"],
+      ["Open in Cleaning (B3)", "/cleaning/dataset-1"],
+      ["Open as the base in Resample & Merge (B4)", "/resample/dataset-1"],
+    ] as const;
+    for (const [title, path] of quickActions) {
+      fireEvent.click(screen.getByTitle(title));
+      await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(path));
+    }
   });
 });

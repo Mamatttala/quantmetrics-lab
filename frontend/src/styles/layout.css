@@ -596,8 +596,37 @@
 }
 
 @media (max-width: 960px) {
+  /* The default `auto` grid track is min-content-sized, so long nav labels can
+   * otherwise keep the sidebar track wider even after the sidebar itself is set to
+   * 52px. Fix the first track at the same breakpoint as the rail. */
+  .shell {
+    grid-template-columns: var(--pane-sidebar-collapsed) auto 1fr;
+  }
+
   .sidebar {
     width: var(--pane-sidebar-collapsed);
+    min-width: 0;
+    max-width: var(--pane-sidebar-collapsed);
+    flex: 0 0 var(--pane-sidebar-collapsed);
+  }
+
+  /* The CSS media query collapses the rail even when React's persisted state is
+   * still expanded. Stack both header controls here as well, otherwise their
+   * combined 62px intrinsic width cannot fit inside the 52px rail. */
+  .sidebar .sidebar__header {
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 4px;
+  }
+
+  .sidebar .sidebar__header-actions {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sidebar .sidebar__header-actions button {
+    width: 100%;
+    padding: 4px;
   }
 
   .sidebar .sidebar__brand,

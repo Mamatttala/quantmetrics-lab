@@ -198,6 +198,13 @@ class Page:
         with suppress(Exception):
             self.ws.close()
 
+    def set_viewport(self, width: int, height: int = 1000) -> None:
+        """Resize the emulated browser viewport without navigating away."""
+        self.send(
+            "Emulation.setDeviceMetricsOverride",
+            {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+        )
+
 
 # --------------------------------------------------------------- page helpers
 
@@ -702,6 +709,59 @@ def main() -> int:
               bool(page.evaluate(CLICK_SELECTOR % json.dumps(".sidebar__collapse")))
               and page.wait_for("document.querySelector('.sidebar--collapsed') === null"))
 
+        # CSS owns the narrow-layout collapse so it also works when the persisted React
+        # state says "expanded". Check the geometry at the breakpoint and below it rather
+        # than only checking that a media rule exists: the header controls were previously
+        # left in a horizontal 62px row inside the 52px rail.
+        print("== responsive shell widths ==")
+        for width in (1200, 960, 600):
+            page.set_viewport(width)
+            ready = page.wait_for(f"window.innerWidth === {width}")
+            geometry = page.evaluate(
+                "(() => {"
+                "  const sidebar = document.querySelector('.sidebar');"
+                "  const header = document.querySelector('.sidebar__header');"
+                "  const actions = document.querySelector('.sidebar__header-actions');"
+                "  if (!sidebar || !header || !actions) return null;"
+                "  const buttons = Array.from(actions.querySelectorAll('button'));"
+                "  return {"
+                "    width: Math.round(sidebar.getBoundingClientRect().width),"
+                "    overflow: sidebar.scrollWidth > sidebar.clientWidth,"
+                "    headerDirection: getComputedStyle(header).flexDirection,"
+                "    actionsDirection: getComputedStyle(actions).flexDirection,"
+                "    buttonCount: buttons.length,"
+                "    actionsWidth: Math.round(actions.getBoundingClientRect().width),"
+                "    buttonWidths: buttons.map((button) => Math.round("
+                "button.getBoundingClientRect().width))"
+                "  };"
+                "})()"
+            )
+            expected_collapsed = width <= 960
+            buttons_fit = isinstance(geometry, dict) and all(
+                button_width <= geometry["actionsWidth"]
+                for button_width in geometry["buttonWidths"]
+            )
+            check(
+                f"{width}px sidebar geometry is responsive",
+                ready
+                and isinstance(geometry, dict)
+                and geometry["width"] == (52 if expected_collapsed else 220)
+                and geometry["buttonCount"] == 2
+                and not geometry["overflow"],
+                f"{geometry}",
+            )
+            check(
+                f"{width}px sidebar header controls fit the rail",
+                isinstance(geometry, dict)
+                and geometry["headerDirection"] == ("column" if expected_collapsed else "row")
+                and geometry["actionsDirection"] == ("column" if expected_collapsed else "row")
+                and (not expected_collapsed or buttons_fit),
+                f"{geometry}",
+            )
+
+        page.set_viewport(1440)
+        page.wait_for("window.innerWidth === 1440")
+
         # ------------------------------------------------ every sidebar entry
         # The literal reading of "debug every menu button": press each one and see that
         # the route changes and a titled page renders behind it.
@@ -795,7 +855,10 @@ def main() -> int:
                 " const button = row && row.querySelector('.icon-btn:not(.danger)');"
                 " if (!button) return false; button.click(); return true; })()"
             ))
-            and page.wait_for(f"document.body.innerText.includes({json.dumps(renamed_name)})"),
+            and page.wait_for(
+                f"document.querySelector({row_selector_js})?.querySelector('.explorer__item')?"
+                f".innerText === {json.dumps(renamed_name)}"
+            ),
             renamed_name,
         )
         page.evaluate(f"window.prompt = () => {json.dumps(klines['name'])}")
@@ -804,7 +867,10 @@ def main() -> int:
         )
         check(
             "a renamed dataset can be restored from the same row",
-            page.wait_for(f"document.body.innerText.includes({json.dumps(klines['name'])})"),
+            page.wait_for(
+                f"document.querySelector({row_selector_js})?.querySelector('.explorer__item')?"
+                f".innerText === {json.dumps(klines['name'])}"
+            ),
         )
 
         for label, path in (("view", "view"), ("clean", "cleaning"), ("merge", "resample")):

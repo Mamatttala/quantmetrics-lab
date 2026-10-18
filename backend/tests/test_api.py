@@ -197,7 +197,9 @@ def test_rename_to_an_empty_name_is_rejected(client: TestClient) -> None:
 
 def test_delete_removes_the_dataset(client: TestClient) -> None:
     created = upload(client, hourly_frame(20)).json()
-    assert client.delete(f"/api/datasets/{created['dataset_id']}").status_code == 204
+    response = client.delete(f"/api/datasets/{created['dataset_id']}")
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True}
     assert client.get(f"/api/datasets/{created['dataset_id']}").status_code == 404
 
 

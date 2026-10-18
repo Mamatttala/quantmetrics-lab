@@ -44,6 +44,57 @@ def css(page, selector: str, prop: str) -> str:
     return page.eval_on_selector(selector, f"el => getComputedStyle(el).{prop}")
 
 
+def css_var(page, name: str) -> str:
+    return page.evaluate(
+        "(name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()",
+        name,
+    )
+
+
+def stylesheet_text(page) -> str:
+    return page.evaluate(
+        """
+        () => Array.from(document.styleSheets).flatMap((sheet) => {
+          try {
+            return Array.from(sheet.cssRules, (rule) => rule.cssText);
+          } catch {
+            return [];
+          }
+        }).join("\\n")
+        """
+    )
+
+
+def add_theme_fixtures(page) -> None:
+    page.evaluate(
+        """
+        () => {
+          const select = document.createElement("select");
+          select.id = "theme-verification-select";
+          select.append(new Option("verification", "verification"));
+          select.style.position = "fixed";
+          select.style.left = "-10000px";
+          select.style.top = "-10000px";
+          document.body.append(select);
+
+          const modal = document.createElement("div");
+          modal.id = "theme-verification-modal";
+          modal.className = "modal";
+          modal.style.position = "fixed";
+          modal.style.left = "-10000px";
+          modal.style.top = "-10000px";
+          document.body.append(modal);
+        }
+        """
+    )
+
+
+def check_theme_tokens(page, label: str) -> None:
+    for name in ("--accent-dim", "--tooltip-shadow", "--modal-shadow"):
+        value = css_var(page, name)
+        check(f"{label} {name} is defined", bool(value), value)
+
+
 def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -51,12 +102,17 @@ def main() -> int:
         page.goto(URL, wait_until="domcontentloaded")
         page.wait_for_selector(".theme-toggle", timeout=30_000)
         page.wait_for_timeout(500)
+        add_theme_fixtures(page)
+        stylesheet = stylesheet_text(page)
 
         print("initial (dark) state")
         check("default theme is dark", theme(page) == "dark", theme(page))
+        check_theme_tokens(page, "dark")
         check("body background is #111111", css(page, "body", "backgroundColor") == DARK_BODY,
               css(page, "body", "backgroundColor"))
-        check("sidebar background is #1a1a1a", css(page, ".sidebar", "backgroundColor") == DARK_SIDEBAR,
+        check(
+            "sidebar background is #1a1a1a",
+            css(page, ".sidebar", "backgroundColor") == DARK_SIDEBAR,
               css(page, ".sidebar", "backgroundColor"))
         check("two toggles are present (sidebar + explorer)",
               page.locator(".theme-toggle").count() >= 2,
@@ -67,15 +123,33 @@ def main() -> int:
 
         print("after switching to light")
         check("theme attribute is light", theme(page) == "light", theme(page))
+        check_theme_tokens(page, "light")
         check("body background is #ffffff", css(page, "body", "backgroundColor") == LIGHT_BODY,
               css(page, "body", "backgroundColor"))
-        check("sidebar background is #f8f9fa", css(page, ".sidebar", "backgroundColor") == LIGHT_SIDEBAR,
+        check(
+            "sidebar background is #f8f9fa",
+            css(page, ".sidebar", "backgroundColor") == LIGHT_SIDEBAR,
               css(page, ".sidebar", "backgroundColor"))
-        check("localStorage persisted light", page.evaluate("localStorage.getItem('theme')") == "light",
+        check(
+            "localStorage persisted light",
+            page.evaluate("localStorage.getItem('theme')") == "light",
               page.evaluate("localStorage.getItem('theme')"))
         check("explorer background flipped",
               css(page, ".explorer", "backgroundColor") == "rgb(241, 245, 249)",
               css(page, ".explorer", "backgroundColor"))
+        check("select arrow uses --accent-dim",
+              ".select-arrow" in stylesheet and "stroke: var(--accent-dim)" in stylesheet
+              and "var(--accent-dim)" in stylesheet,
+              "global select arrow rule")
+        check("select arrow has no hardcoded stroke color",
+              "stroke='%23d4a843'" not in stylesheet and "stroke: #d4a843" not in stylesheet,
+              "no fixed SVG stroke")
+        check("select arrow is rendered",
+              css(page, "#theme-verification-select", "backgroundImage") != "none",
+              css(page, "#theme-verification-select", "backgroundImage"))
+        check("modal uses the light shadow token",
+              css(page, "#theme-verification-modal", "boxShadow") != "none",
+              css(page, "#theme-verification-modal", "boxShadow"))
 
         page.reload(wait_until="domcontentloaded")
         page.wait_for_selector(".theme-toggle", timeout=30_000)

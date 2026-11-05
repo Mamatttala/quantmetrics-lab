@@ -56,5 +56,3 @@ def register(
         )
     )
     return dataset_id
-
-

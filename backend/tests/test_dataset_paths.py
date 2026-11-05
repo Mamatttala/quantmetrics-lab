@@ -38,4 +38,3 @@ def test_recorded_suffix_is_preserved_without_id_or_category_fallback(
 
     assert resolved_path(historical, settings) == expected
     assert not resolved_path(historical, settings).exists()
-

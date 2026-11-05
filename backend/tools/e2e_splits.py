@@ -68,7 +68,7 @@ PLAN_COLUMNS = (
 ROWS = 400
 
 FOLDS = 4
-BLOCK = ROWS // (FOLDS + 1)
+BLOCK = ROWS // (FOLDS + 2)
 
 
 def call(method: str, path: str, payload: dict[str, Any] | None = None) -> tuple[int, Any]:
@@ -324,7 +324,7 @@ print("== the stored plan table ==")
 
 plan_id = plan_dataset_of(created).get("dataset_id")
 check(
-    "the plan is stored as an outputs dataset, produced by the split operation",
+    "the boundary plan is stored in outputs and its observations in processed data",
     plan_dataset_of(created).get("category") == "outputs"
     and plan_dataset_of(created).get("operation") == "split",
     json.dumps(
@@ -333,6 +333,12 @@ check(
             for key in ("category", "operation", "parent_dataset_id")
         }
     ),
+)
+check(
+    "the materialised split partitions are processed observation datasets",
+    bool(created.get("partitions"))
+    and all(item.get("category") == "processed_data" for item in created["partitions"]),
+    str([item.get("category") for item in created.get("partitions", [])]),
 )
 check(
     "the plan is parented to the dataset it describes",
@@ -500,16 +506,16 @@ check(
 
 print("== walk-forward, embargo and purge ==")
 
-status, tscv = create(source_id, "tscv_expanding", n_folds=FOLDS)
+status, tscv = create(source_id, "tscv_expanding", n_folds=FOLDS, include_validation=True)
 tscv_plan = spans_of(tscv)
 pairs = fold_pairs(tscv_plan) if tscv_plan else []
 first_train, first_test = pairs[0] if pairs else ({}, {})
 check(
-    "an expanding walk-forward cuts the series into folds + 1 equal blocks",
+    "an expanding walk-forward cuts the series into folds + 2 blocks",
     status == 201
     and len(pairs) == FOLDS
     and (first_train.get("start_index"), first_train.get("end_index")) == (0, BLOCK)
-    and (first_test.get("start_index"), first_test.get("end_index")) == (BLOCK, 2 * BLOCK),
+    and (first_test.get("start_index"), first_test.get("end_index")) == (2 * BLOCK, 3 * BLOCK),
     f"status={status} folds={len(pairs)} block={BLOCK} "
     f"train={first_train.get('start_index')}:{first_train.get('end_index')} "
     f"test={first_test.get('start_index')}:{first_test.get('end_index')}",
@@ -520,8 +526,8 @@ check(
     f"{len(pairs)} folds checked",
 )
 check(
-    "the first block is never tested — it is the data every fold starts from",
-    bool(pairs) and all(s["start_index"] >= BLOCK for _, s in pairs),
+    "the first two blocks are never tested — they seed training and validation",
+    bool(pairs) and all(s["start_index"] >= 2 * BLOCK for _, s in pairs),
     f"earliest test start={min((s['start_index'] for _, s in pairs), default=None)}",
 )
 check(
@@ -531,7 +537,8 @@ check(
 )
 
 status, purged = create(
-    source_id, "tscv_expanding", n_folds=FOLDS, purge_flag=True, label_horizon_bars=5
+    source_id, "tscv_expanding", n_folds=FOLDS, purge_flag=True, label_horizon_bars=5,
+    include_validation=True,
 )
 purged_plan = spans_of(purged)
 purged_report = report_of(purged)
@@ -547,8 +554,8 @@ check(
     f"status={status} boundary={json.dumps(boundary)}",
 )
 check(
-    "so the training span ends five rows before the test span begins",
-    p_train["end_index"] == p_test["start_index"] - 5,
+    "so training ends five rows before validation begins",
+    p_train["end_index"] == BLOCK - 5,
     f"train ends at {p_train['end_index']}, test starts at {p_test['start_index']}",
 )
 # Scoped to fold 1, and deliberately. An expanding fold re-trains from row zero every time,
@@ -557,7 +564,7 @@ check(
 # look-ahead. What must not happen is the purged row staying where it was, in the span it was
 # cut from, or being handed to the test span instead.
 fold_1 = [span for span in purged_plan if span["fold"] == 1]
-dropped = range(p_train["end_index"], p_test["start_index"])
+dropped = range(p_train["end_index"], BLOCK)
 check(
     "the purged rows are in neither the training span they were cut from nor the test span",
     dropped.start < dropped.stop
@@ -574,6 +581,7 @@ status, both = create(
     source_id,
     "tscv_expanding",
     n_folds=FOLDS,
+    include_validation=True,
     gap_size=5,
     purge_flag=True,
     label_horizon_bars=5,
@@ -593,7 +601,7 @@ check(
     json.dumps(both_report.get("warnings"))[:220],
 )
 
-status, rolling = create(source_id, "tscv_rolling", n_folds=FOLDS)
+status, rolling = create(source_id, "tscv_rolling", n_folds=FOLDS, include_validation=True)
 rolling_plan = spans_of(rolling)
 fold3_train = next(r for r in rolling_plan if r["fold"] == 3 and r["role"] == "train")
 fold3_test = next(r for r in rolling_plan if r["fold"] == 3 and r["role"] == "test")
@@ -601,7 +609,7 @@ check(
     "a rolling window trains on the single block before the cut, not on all history",
     status == 201
     and fold3_train["end_index"] - fold3_train["start_index"] == BLOCK
-    and fold3_train["end_index"] == fold3_test["start_index"],
+    and fold3_train["end_index"] == fold3_test["start_index"] - BLOCK,
     f"status={status} train={fold3_train['start_index']}:{fold3_train['end_index']} "
     f"test starts {fold3_test['start_index']} (block={BLOCK})",
 )

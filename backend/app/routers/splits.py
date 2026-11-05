@@ -35,7 +35,7 @@ async def create_split(request: SplitCreateRequest) -> dict[str, Any]:
 
     Nothing in the source dataset is modified — a plan describes a frame, it does not
     slice one — so there is no new price table to go looking for. The plan lands in the
-    ``outputs`` library, and its ``split_id`` is the id of that stored dataset: one
+    ``splits`` library, and its ``split_id`` is the id of that stored dataset: one
     identifier, not two.
 
     Refusals are 422 (``ValidationFailure``): a dataset that is not strictly ordered by its
@@ -53,7 +53,7 @@ async def list_plans(
 ) -> list[SplitPlanSummary]:
     """Every plan already made from this dataset, newest first.
 
-    Read from the lineage table rather than by scanning the ``outputs`` library, so the
+    Read from the lineage table rather than by scanning the ``splits`` library, so the
     list is exactly the plans derived from *this* dataset and not every plan in the store.
     """
     return await SplitService().plans(dataset_id)

@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.core.errors import ValidationFailure
 from app.models.dataset import ColumnMeta, DatasetMeta, DatasetSummary
 from app.models.enums import (
     AssetClass,
@@ -25,6 +26,13 @@ from app.models.enums import (
     JobStatus,
     Provider,
     Timeframe,
+)
+from app.models.naming import (
+    NAMING_VERSION,
+    artifact_kind,
+    category_for,
+    named_metadata,
+    origin_page,
 )
 
 #: Bumped only for a change that requires the user to act — a dropped column, a changed
@@ -181,6 +189,36 @@ class Catalog:
                     f"Catalog schema is v{row['version']}, this build expects "
                     f"v{SCHEMA_VERSION}. Migrate or remove {self.path}."
                 )
+            # Metadata-only, repeatable upgrade. Recorded paths and all bytes stay intact.
+            rows = self.conn.execute(
+                "SELECT dataset_id FROM datasets WHERE "
+                "COALESCE(json_extract(provenance, '$.naming_version'), '') != ?",
+                (NAMING_VERSION,),
+            ).fetchall()
+            for row in rows:
+                meta = self.get_dataset(row["dataset_id"])
+                assert meta is not None
+                category = category_for(meta.operation, meta.category)
+                if meta.operation == "pca_dimensionality_reduction":
+                    category = (
+                        DatasetCategory.PROCESSED
+                        if meta.provenance.get("causal_for_downstream_training") == "true"
+                        else DatasetCategory.OUTPUTS
+                    )
+                updated = named_metadata(
+                    meta.model_copy(update={"category": category}),
+                    custom=meta.provenance.get("naming_custom") == "true",
+                )
+                self.conn.execute(
+                    "UPDATE datasets SET name = ?, category = ?, provenance = ? "
+                    "WHERE dataset_id = ?",
+                    (
+                        updated.name,
+                        updated.category.value,
+                        json.dumps(updated.provenance),
+                        meta.dataset_id,
+                    ),
+                )
             self.conn.commit()
 
     # ------------------------------------------------------------------ datasets
@@ -258,12 +296,29 @@ class Catalog:
         """Rename is metadata-only. Storage paths are derived from the id, so the
         file never moves and the checksum is untouched."""
         with self._lock:
+            meta = self.get_dataset(dataset_id)
+            if meta is None:
+                raise KeyError(dataset_id)
+            provenance = {**meta.provenance, "naming_custom": "true"}
             cur = self.conn.execute(
-                "UPDATE datasets SET name = ? WHERE dataset_id = ?", (new_name, dataset_id)
+                "UPDATE datasets SET name = ?, provenance = ? WHERE dataset_id = ?",
+                (new_name, json.dumps(provenance), dataset_id),
             )
             self.conn.commit()
             if cur.rowcount == 0:
                 raise KeyError(dataset_id)
+
+    def annotate_dataset(self, dataset_id: str, notes: dict[str, str]) -> None:
+        """Add catalog notes without changing the immutable data or its lineage."""
+        with self._lock:
+            meta = self.get_dataset(dataset_id)
+            if meta is None:
+                raise KeyError(dataset_id)
+            self.conn.execute(
+                "UPDATE datasets SET provenance = ? WHERE dataset_id = ?",
+                (json.dumps({**meta.provenance, **notes}), dataset_id),
+            )
+            self.conn.commit()
 
     def delete_dataset(self, dataset_id: str) -> str | None:
         """Remove the catalog row and return its storage path for the caller to unlink.
@@ -496,6 +551,27 @@ class Catalog:
             )
             self.conn.commit()
 
+    def update_job_progress(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+        message: str | None = None,
+    ) -> None:
+        """Update a running coordinator's visible progress without making it terminal."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE jobs SET result = ?, message = ? "
+                "WHERE job_id = ? AND status = ?",
+                (
+                    json.dumps(result, default=str) if result is not None else None,
+                    message,
+                    job_id,
+                    JobStatus.RUNNING.value,
+                ),
+            )
+            self.conn.commit()
+
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self._lock:
             row = self.conn.execute(
@@ -542,6 +618,8 @@ def _row_to_meta(row: sqlite3.Row, columns: Sequence[sqlite3.Row]) -> DatasetMet
 
 
 def _row_to_summary(row: sqlite3.Row) -> DatasetSummary:
+    operation = json.loads(row["provenance"]).get("operation") or None
+    category = DatasetCategory(row["category"])
     return DatasetSummary(
         dataset_id=row["dataset_id"],
         name=row["name"],
@@ -554,7 +632,9 @@ def _row_to_summary(row: sqlite3.Row) -> DatasetSummary:
         end_timestamp=_parse_dt(row["end_timestamp"]),
         created_at=_parse_dt(row["created_at"]),
         parent_dataset_id=row["parent_dataset_id"],
-        operation=json.loads(row["provenance"]).get("operation") or None,
+        operation=operation,
+        artifact_kind=artifact_kind(operation, category),
+        origin_page=origin_page(operation, category),
     )
 
 

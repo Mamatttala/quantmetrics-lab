@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -59,7 +60,7 @@ export function RawDataView() {
   const loadCandidates = useCallback(async () => {
     try {
       const rows = await api.listDatasets();
-      setCandidates(rows.filter((d) => d.row_count > 0));
+      setCandidates(rows.filter((d) => d.row_count > 0 && d.artifact_kind === "observations"));
     } catch {
       // The main load below reports the failure; a second identical banner would
       // just be noise.
@@ -199,8 +200,11 @@ export function RawDataView() {
 
       {status === "idle" && (
         <div className="panel muted">
-          No dataset selected. Pick one above, or click a dataset in the Data Explorer
-          and open it here.
+          No dataset selected.
+          <Description anchor=".panel">
+            Pick one above, or click a dataset in the Data Explorer
+            and open it here.
+          </Description>
         </div>
       )}
 
@@ -249,7 +253,7 @@ export function RawDataView() {
                 type="button"
                 className="btn btn--ghost btn--sm"
                 onClick={() =>
-                  window.open(`/api/datasets/${datasetId}/export?format=csv`)
+                  window.open(api.datasetExportUrl(datasetId, "csv"))
                 }
               >
                 export CSV

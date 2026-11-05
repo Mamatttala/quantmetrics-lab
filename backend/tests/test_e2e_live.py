@@ -1,7 +1,7 @@
 """The end-to-end drivers, run as tests.
 
 `tools/e2e_part_b.py`, `tools/e2e_part_b_merge.py`, `tools/e2e_features.py`,
-`tools/e2e_regime.py`, `tools/e2e_splits.py`, `tools/e2e_scaling.py`,
+`tools/verify_regimes_browser.py`, `tools/e2e_splits.py`, `tools/e2e_scaling.py`,
 `tools/e2e_volatility.py`, and `tools/e2e_ui.py`
 are scripts because they need a live server and a browser, which `pytest` should not require
 of every run. This wraps them so the same checks are reachable from the ordinary test entry
@@ -16,7 +16,8 @@ should have.
 What this adds over running the scripts by hand is the server lifecycle: the fixture
 restarts both processes first, so the drivers can never be pointed at a server still
 running the previous revision of the code — which is exactly how an earlier round of
-verification read stale behaviour and reported it as a defect.
+verification read stale behaviour and reported it as a defect. The D9–D11 driver
+owns an isolated server and copied dataset, so it does not use that shared fixture.
 """
 
 from __future__ import annotations
@@ -101,9 +102,9 @@ def test_feature_endpoints(servers: None) -> None:
     run_driver("e2e_features.py")
 
 
-def test_regime_endpoints(servers: None) -> None:
-    """The 202-then-poll handshake, a written regime frame, the crisis override, refusals."""
-    run_driver("e2e_regime.py")
+def test_regime_endpoints() -> None:
+    """Existing BTCUSDT D9 fit, D10 approval, D11 inference, browser and bundle checks."""
+    run_driver("verify_regimes_browser.py")
 
 
 def test_split_endpoints(servers: None) -> None:

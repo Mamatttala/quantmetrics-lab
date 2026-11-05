@@ -69,18 +69,19 @@ export function FeaturePicker({
 }: FeaturePickerProps) {
   const tickable = group.features.filter((spec) => spec.available);
   const allOn = tickable.length > 0 && tickable.every((spec) => picked.has(spec.id));
+  const selectedCount = group.features.filter((spec) => picked.has(spec.id)).length;
 
   return (
     <section className="section feature__group">
       <div className="section__head">
         <h3 className="section__title">{FEATURE_GROUP_LABELS[group.group]}</h3>
         <span className="muted feature__count">
-          {tickable.length} of {group.features.length} available
+          {selectedCount} selected · {tickable.length} of {group.features.length} available
         </span>
         <div className="actions__spacer" />
         <button
           type="button"
-          className="btn btn--ghost"
+          className="btn btn--ghost btn--sm"
           disabled={busy || tickable.length === 0}
           onClick={() => onToggleGroup(group, !allOn)}
         >
@@ -155,6 +156,12 @@ function FeatureRow({
     )
     .join(", ");
 
+  const cautions = [
+    spec.caution,
+    off ? spec.reason : null,
+    ...spec.windows.filter((window) => !window.available && window.reason !== null)
+      .map((window) => `${window.token}: ${window.reason}`),
+  ].filter((reason): reason is string => !!reason);
   const meta = [
     spec.needs.length > 0 ? `needs ${spec.needs.join(", ")}` : "",
     spec.needs_price ? "uses the price source" : "",
@@ -162,57 +169,62 @@ function FeatureRow({
   ].filter((entry) => entry !== "");
 
   return (
-    <div className={`feature__row${off ? " feature__row--off" : ""}`}>
-      <label className="feature__pick">
-        <input
-          type="checkbox"
-          checked={picked}
-          disabled={busy || off}
-          onChange={() => onTogglePick(spec)}
+    <div className={`feature__row${picked ? " feature__row--selected" : ""}${off ? " feature__row--off" : ""}`}>
+      <div className="feature__header">
+        <label className="feature__pick">
+          <input
+            type="checkbox"
+            checked={picked}
+            disabled={busy || off}
+            onChange={() => onTogglePick(spec)}
+          />
+          <span className="feature__label">{spec.label}</span>
+        </label>
+
+        <InfoTip
+          label={`Formula for ${spec.label}`}
+          formula={spec.formula}
+          detail={spec.detail}
+          caution={cautions.join(" ") || null}
+          meta={
+            spec.param === null && spec.warmup_bars !== null
+              ? [...meta, `${spec.warmup_bars} warm-up bars`]
+              : meta
+          }
         />
-        <span className="feature__label">{spec.label}</span>
-      </label>
+      </div>
 
-      <InfoTip
-        label={`Formula for ${spec.label}`}
-        formula={spec.formula}
-        detail={spec.detail}
-        caution={spec.caution}
-        meta={
-          spec.param === null && spec.warmup_bars !== null
-            ? [...meta, `${spec.warmup_bars} warm-up bars`]
-            : meta
-        }
-      />
+      <div className="feature__output">
+        <span className="feature__meta-label">Output</span>
+        <span className="feature__produces mono muted" title={produces}>{produces}</span>
+      </div>
 
-      <span className="feature__produces mono muted">{produces}</span>
-
-      {off && spec.reason !== null && (
-        <span className="feature__reason">{spec.reason}</span>
-      )}
-
-      {!off && spec.param !== null && (
+      {picked && !off && spec.param !== null && (
         <div className="feature__windows">
-          {spec.windows.map((window) => (
-            <label
-              key={window.token}
-              className={`feature__tick${window.available ? "" : " feature__tick--off"}`}
-            >
-              <input
-                type="checkbox"
-                checked={windows.includes(window.token)}
-                disabled={busy || !window.available}
-                onChange={(event) => setWindow(window.token, event.target.checked)}
-              />
-              <span className="mono">{window.token}</span>
-              {window.bars !== null && spec.param?.kind === "duration" && (
-                <span className="muted feature__bars">= {window.bars} bars</span>
-              )}
-            </label>
-          ))}
+          <span className="feature__meta-label">{spec.param.kind === "bars" ? "Windows (bars)" : "Windows"}</span>
+          <div className="feature__presets">
+            {spec.windows.map((window) => (
+              <label
+                key={window.token}
+                className={`feature__tick${window.available ? "" : " feature__tick--off"}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={windows.includes(window.token)}
+                  disabled={busy || !window.available}
+                  onChange={(event) => setWindow(window.token, event.target.checked)}
+                />
+                <span className="mono">{window.token}</span>
+                {window.bars !== null && spec.param?.kind === "duration" && (
+                  <span className="muted feature__bars">= {window.bars} bars</span>
+                )}
+              </label>
+            ))}
+          </div>
 
           {spec.param.custom && (
             <span className="feature__custom">
+              <span className="feature__meta-label">Custom</span>
               <input
                 type="text"
                 className="feature__input mono"
@@ -230,40 +242,33 @@ function FeatureRow({
               />
               <button
                 type="button"
-                className="btn btn--ghost"
+                className="btn btn--ghost btn--sm feature__add"
+                aria-label={`Add custom window for ${spec.label}`}
                 disabled={busy || draft.trim() === ""}
                 onClick={addCustom}
               >
-                Add another
+                Add
               </button>
             </span>
           )}
 
-          {custom.map((token) => (
-            <button
-              key={token}
-              type="button"
-              className="feature__chip"
-              disabled={busy}
-              aria-label={`Remove window ${token} from ${spec.label}`}
-              onClick={() => setWindow(token, false)}
-            >
-              <span className="mono">{token}</span>
-              <span aria-hidden="true"> ×</span>
-            </button>
-          ))}
-
-          {/* A tick that cannot be resolved on this dataset says why, in place. The
-              custom box is not checked here: resolving an arbitrary token is the
-              backend's job, and a second implementation of that arithmetic in the
-              browser is exactly the drift the catalogue exists to prevent. */}
-          {spec.windows
-            .filter((window) => !window.available && window.reason !== null)
-            .map((window) => (
-              <span className="feature__reason" key={`why-${window.token}`}>
-                {window.token}: {window.reason}
-              </span>
-            ))}
+          {custom.length > 0 && (
+            <div className="feature__custom-values">
+              {custom.map((token) => (
+                <button
+                  key={token}
+                  type="button"
+                  className="feature__chip"
+                  disabled={busy}
+                  aria-label={`Remove window ${token} from ${spec.label}`}
+                  onClick={() => setWindow(token, false)}
+                >
+                  <span className="mono">{token}</span>
+                  <span aria-hidden="true"> ×</span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

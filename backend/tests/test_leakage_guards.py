@@ -68,6 +68,20 @@ from app.storage.catalog import Catalog
 from tests.conftest import hourly_frame, register
 
 SERVICES = Path(__file__).resolve().parent.parent / "app" / "services"
+APP_ROOT = SERVICES.parent
+
+
+def test_exploratory_observation_and_rolling_guards():
+    from app.services.exploratory import observation_column, scope_frame
+
+    for name in ("exploratory_stats.py", "exploratory_corr.py", "exploratory_pca.py"):
+        source = (SERVICES / name).read_text(encoding="utf-8")
+        assert "close_time" not in source
+        assert "center=True" not in source
+        assert ".bfill(" not in source
+        assert "backfill" not in source
+    assert "close_time" not in inspect.getsource(scope_frame)
+    assert '!= "close_time"' in inspect.getsource(observation_column)
 
 
 # ------------------------------------------------------- observation-time rule
@@ -195,7 +209,8 @@ async def test_identical_content_is_registered_once(settings: Settings, catalog:
     # The duplicate's name is discarded along with its file — the first registration
     # owns the content, and renaming it to match the second call would be a silent
     # edit to a dataset the user already has.
-    assert second.name == "first"
+    assert second.name == first.name
+    assert "__raw__" in first.name
 
     assert len(catalog.list_datasets()) == 1
     assert len(list(settings.data_dir.rglob("*.parquet"))) == 1
@@ -298,22 +313,11 @@ def test_the_split_module_never_names_the_bar_close() -> None:
     assert "close_time" not in (SERVICES / "splits.py").read_text(encoding="utf-8")
 
 
-def test_a_module_never_names_its_time_column_for_the_wrong_instant() -> None:
-    """A column called `close_time` holding `open_time` values is a mislabelled join key.
-
-    `regime_engine` built its output frame with a column named `close_time` whose values were
-    `frame[time_column]` — the *observation* instant. The frame was correct and the name was
-    a lie, which is the more dangerous of the two: any consumer that joined on the name
-    rather than reading it (Module E's conditioning join is exactly such a consumer) would
-    have aligned every regime with the following bar, off by one, with no error and a chart
-    that looks entirely plausible.
-
-    The behavioural half lives in `test_regime_engine.py` and `test_regime_api.py`, which
-    assert the output schema. This half catches the mistake at the source, where it is
-    unambiguous: the engine must not mention the bar-close instant at all.
-    """
-    assert "close_time" not in (SERVICES / "regime_engine.py").read_text(encoding="utf-8")
-
+def test_regime_observation_and_availability_times_remain_distinct() -> None:
+    from app.services.regimes.experiments import assignments
+    from app.services.regimes.inference import infer
+    assert '"timestamp"' in inspect.getsource(assignments)
+    assert '"available_at"' in inspect.getsource(infer)
 
 def test_the_split_module_reads_the_shared_timestamp_candidates() -> None:
     """C6 must not roll its own list of time columns.
@@ -336,20 +340,13 @@ def test_the_scaling_module_never_centres_a_rolling_window() -> None:
     assert "center=True" not in (SERVICES / "scaling.py").read_text(encoding="utf-8")
 
 
-def test_a_fitted_scaler_cannot_be_requested_without_a_plan() -> None:
-    """The golden rule, held by the schema rather than by the implementation.
-
-    `ScalingRequest` makes `split_plan_id` mandatory for the three fitted scalers, so there
-    is no request shape — and therefore no code path — that fits on everything. Asserting
-    the rule where it is *enforced* is the difference between "the service remembers to
-    check" and "the request cannot say it".
-    """
-    assert "needs_split_plan" in inspect.getsource(scaling_module)
+def test_fitted_scalers_offer_full_dataset_or_training_scope() -> None:
+    """A plan still restricts fitting; omitting it explicitly selects the whole dataset."""
+    assert "full_dataset" in inspect.getsource(scaling_module)
     for scaler in (ScalerType.MINMAX, ScalerType.STANDARD, ScalerType.ROBUST):
-        assert scaler.needs_split_plan is True
-        with pytest.raises(ValueError, match="needs split_plan_id"):
-            ScalingRequest(dataset_id="x", scaler_type=scaler)
-    assert ScalerType.ROLLING_ZSCORE.needs_split_plan is False
+        assert scaler.is_fitted is True
+        assert ScalingRequest(dataset_id="x", scaler_type=scaler).split_plan_id is None
+    assert ScalerType.ROLLING_ZSCORE.is_fitted is False
 
 
 async def test_a_standard_scaler_does_not_carry_the_test_spans_mean(
@@ -478,19 +475,22 @@ async def test_the_tscv_purge_removes_the_last_label_horizon_rows(
             dataset_id=parent.dataset_id,
             split_type=SplitType.TSCV_EXPANDING,
             parameters=SplitParameters(
-                n_folds=4, gap_size=0, purge_flag=True, label_horizon_bars=5
+                n_folds=4, gap_size=0, purge_flag=True, label_horizon_bars=5,
+                include_validation=True,
             ),
         )
     )
 
     first = created.report.boundaries[0]
-    assert first["cut_index"] == 20
+    assert first["cut_index"] == 16
     assert first["purge_rows_removed"] == 5
-    assert first["effective_end_index"] == 15
+    assert first["effective_end_index"] == 11
 
     train = next(r for r in created.plan if r.fold == 1 and r.role is SplitRole.TRAIN)
+    val = next(r for r in created.plan if r.fold == 1 and r.role is SplitRole.VAL)
     test = next(r for r in created.plan if r.fold == 1 and r.role is SplitRole.TEST)
-    assert train.end_index == test.start_index - 5
+    assert train.end_index == val.start_index - 5
+    assert val.end_index == test.start_index - 5
 
 
 async def test_the_tscv_purge_removes_nothing_when_the_gap_already_covers_it(
@@ -509,7 +509,8 @@ async def test_the_tscv_purge_removes_nothing_when_the_gap_already_covers_it(
             dataset_id=parent.dataset_id,
             split_type=SplitType.TSCV_EXPANDING,
             parameters=SplitParameters(
-                n_folds=4, gap_size=5, purge_flag=True, label_horizon_bars=5
+                n_folds=4, gap_size=5, purge_flag=True, label_horizon_bars=5,
+                include_validation=True,
             ),
         )
     )
@@ -517,7 +518,7 @@ async def test_the_tscv_purge_removes_nothing_when_the_gap_already_covers_it(
     first = created.report.boundaries[0]
     assert first["gap_rows_removed"] == 5
     assert first["purge_rows_removed"] == 0
-    assert first["effective_end_index"] == 15
+    assert first["effective_end_index"] == 11
     assert any("purge_flag removed no rows" in note for note in created.report.warnings)
 
 

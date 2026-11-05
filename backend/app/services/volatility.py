@@ -44,7 +44,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import ValidationFailure
 from app.models.dataset import DatasetMeta
@@ -222,6 +222,7 @@ class _WalkForward:
     seconds: float
     clamped: int
     untrained: bool
+    fallbacks: int = 0
     failures: list[str] = field(default_factory=list)
 
 
@@ -248,9 +249,7 @@ def _validate_schedule(spec: WalkForwardSpec, n_rows: int) -> list[int]:
 # ---------------------------------------------------------------------- the series
 
 
-def _resolve_returns(
-    frame: pd.DataFrame, price_source: str
-) -> tuple[np.ndarray, str, bool]:
+def _resolve_returns(frame: pd.DataFrame, price_source: str) -> tuple[np.ndarray, str, bool]:
     """The return series a request asks for, and how it was obtained.
 
     ``price_source`` is ``"close"``, ``"log_return"``, or the name of a column. ``"close"``
@@ -361,8 +360,7 @@ def _build_series(
         )
     if not times_all.is_monotonic_increasing:
         raise ValidationFailure(
-            "The time column is not sorted, so a walk-forward over it would not be a "
-            "walk-forward.",
+            "The time column is not sorted, so a walk-forward over it would not be a walk-forward.",
             hint="The scored region is chosen by position; on an unsorted series those "
             "positions are not chronological.",
         )
@@ -494,6 +492,7 @@ def _walk_forward(
     failures: list[str] = []
     clamped = 0
     untrained = False
+    fallbacks = 0
     started = time.perf_counter()
 
     for position, t in enumerate(indices):
@@ -525,6 +524,7 @@ def _walk_forward(
         if isinstance(model, models.HybridModel):
             clamped += model.correction_clamped
             untrained = untrained or model.untrained
+            fallbacks += int(model.forecast_fallback_used)
 
     return _WalkForward(
         model=model.name,
@@ -534,6 +534,7 @@ def _walk_forward(
         seconds=time.perf_counter() - started,
         clamped=clamped,
         untrained=untrained,
+        fallbacks=fallbacks,
         failures=failures,
     )
 
@@ -580,9 +581,7 @@ def _score(run: _WalkForward, family: str) -> VolModelScore:
                 + (
                     " A fit that leaves the parameter space usually has more parameters than "
                     "the window can identify, so a longer train_window is the likeliest fix."
-                    if any(
-                        failure.startswith(FORECAST_REFUSAL_TAG) for failure in run.failures
-                    )
+                    if any(failure.startswith(FORECAST_REFUSAL_TAG) for failure in run.failures)
                     else ""
                 )
             ).strip()
@@ -778,7 +777,7 @@ class VolatilityService:
     """Runs Module E. Public methods are coroutines."""
 
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
         self.datasets = DatasetService(self.settings, self.catalog)
         self.jobs = JobService(self.settings, self.catalog)
@@ -793,7 +792,8 @@ class VolatilityService:
         start. Everything else about the data needs the file read, so it surfaces through
         the job.
         """
-        parent = await self.datasets.get(request.dataset_id)
+        parent = await self.datasets.resolve_frame(request.dataset_id)
+        request = request.model_copy(update={"dataset_id": parent.dataset_id})
         job_id = await self.jobs.create(
             JOB_KIND,
             dataset_id=parent.dataset_id,
@@ -806,7 +806,8 @@ class VolatilityService:
 
     async def run(self, request: VolForecastRequest) -> dict[str, Any]:
         """Compute inline and return the payload, without scheduling a job."""
-        parent = await self.datasets.get(request.dataset_id)
+        parent = await self.datasets.resolve_frame(request.dataset_id)
+        request = request.model_copy(update={"dataset_id": parent.dataset_id})
         return await self._compute(request, parent)
 
     async def job(self, job_id: str) -> JobRecord:
@@ -839,7 +840,7 @@ class VolatilityService:
         this available, and if not why", so a disabled control and a refusal from the run
         endpoint cannot disagree about the reason.
         """
-        meta = await self.datasets.get(dataset_id)
+        meta = await self.datasets.resolve_frame(dataset_id)
         conditioning = await self._conditioning_options()
 
         def work() -> dict[str, Any]:
@@ -948,7 +949,7 @@ class VolatilityService:
         def work() -> list[dict[str, Any]]:
             catalog = self.datasets.catalog
             found: list[dict[str, Any]] = []
-            for summary in catalog.list_datasets(DatasetCategory.OUTPUTS):
+            for summary in catalog.list_datasets():
                 meta = catalog.get_dataset(summary.dataset_id)
                 if meta is None:
                     continue
@@ -975,9 +976,7 @@ class VolatilityService:
 
     # ------------------------------------------------------------------ worker
 
-    async def _execute(
-        self, job_id: str, request: VolForecastRequest, parent: DatasetMeta
-    ) -> None:
+    async def _execute(self, job_id: str, request: VolForecastRequest, parent: DatasetMeta) -> None:
         """The background task: run, then record the terminal state.
 
         Failures are written to the job rather than raised — there is no request left to
@@ -998,9 +997,7 @@ class VolatilityService:
             output_dataset_id=dataset.get("dataset_id"),
         )
 
-    async def _compute(
-        self, request: VolForecastRequest, parent: DatasetMeta
-    ) -> dict[str, Any]:
+    async def _compute(self, request: VolForecastRequest, parent: DatasetMeta) -> dict[str, Any]:
         path = resolved_path(parent, self.settings)
         conditioning_meta: DatasetMeta | None = None
         if request.conditioning_dataset_id is not None:
@@ -1106,12 +1103,11 @@ class VolatilityService:
                     frame=output,
                     data_dir=self.settings.data_dir,
                     catalog=self.catalog,
-                    # `outputs`: the product of an analysis rather than an input to one.
+                    # `forecast_data`: the product of a forecasting run.
                     # Its rows are forecasts, not bars, and a forecasting model that wanted
                     # to consume them would want them as features, not as prices.
-                    category=DatasetCategory.OUTPUTS,
-                    name=request.name
-                    or f"{parent.name} (vol forecast · {_model_summary(request)})",
+                    category=DatasetCategory.FORECAST,
+                    name=request.name,
                     operation=MODULE_SOURCE,
                     detail=_lineage_detail(request, report, conditioning_meta),
                     extra_provenance={
@@ -1329,9 +1325,7 @@ def _report(
     first, last = schedule_indices[0], schedule_indices[-1]
     warnings: list[str] = []
     if series.derived:
-        warnings.append(
-            "Log returns were derived from the close column as diff(log(close))."
-        )
+        warnings.append("Log returns were derived from the close column as diff(log(close)).")
     if series.exog is not None:
         if series.exog_rows_dropped:
             warnings.append(
@@ -1376,6 +1370,11 @@ def _report(
             f"A hybrid's learned correction hit its clamp on "
             f"{sum(run.clamped for run in runs)} steps. A correction pinned at the boundary "
             "is an extrapolation, not a confident view."
+        )
+    if any(run.fallbacks for run in runs):
+        warnings.append(
+            f"A hybrid used its fit-window mean as a bounded fallback on "
+            f"{sum(run.fallbacks for run in runs)} collapsed linear-leg forecasts."
         )
     failures = [failure for run in runs for failure in run.failures]
     if failures:
@@ -1528,8 +1527,6 @@ def _summary_message(payload: dict[str, Any]) -> str:
     scores = report.get("scores") or []
     scored = [entry for entry in scores if entry.get("mqlike") is not None]
     best = min(scored, key=lambda entry: entry["mqlike"], default=None)
-    headline = (
-        f"best MQLIKE {best['mqlike']:.4f} ({best['model']})" if best else "no model scored"
-    )
+    headline = f"best MQLIKE {best['mqlike']:.4f} ({best['model']})" if best else "no model scored"
     where = f"saved as {dataset['name']}" if dataset else "preview only, nothing written"
     return f"{len(scores)} model(s) over {report.get('return_rows', 0)} bars · {headline} · {where}"

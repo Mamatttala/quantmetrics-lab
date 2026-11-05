@@ -8,6 +8,8 @@ synchronous, and calling them directly from a coroutine stalls the whole server.
 from __future__ import annotations
 
 import math
+import os
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,7 +17,7 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import (
     DatasetNotFound,
@@ -24,6 +26,7 @@ from app.core.errors import (
 )
 from app.models.dataset import DatasetMeta, DatasetSummary
 from app.models.enums import DatasetCategory, Timeframe
+from app.models.naming import category_for, named_metadata, source_label
 from app.services import cleaning
 from app.services import feature_catalog as feature_catalogue
 from app.services import merge as merge_frames
@@ -55,7 +58,7 @@ class DatasetService:
     """Reads and writes datasets. Holds no per-request state."""
 
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
 
     # ------------------------------------------------------------------ lookups
@@ -81,6 +84,36 @@ class DatasetService:
 
     async def get(self, dataset_id: str) -> DatasetMeta:
         return await run_blocking(self._require, dataset_id)
+
+    async def resolve_frame(self, dataset_id: str) -> DatasetMeta:
+        """Resolve a downstream selection to bars, including a saved split plan.
+
+        A plan is a reference to its source, never a frame of observations. Keep
+        ordinary get/preview/export unchanged so users can still inspect the plan.
+        Callers that fit against split boundaries must also load the chosen plan.
+        """
+        meta = await self.get(dataset_id)
+        if meta.operation != "split":
+            if meta.artifact_kind != "observations":
+                raise ValidationFailure(
+                    f"'{meta.name}' contains {meta.artifact_kind}, not observation rows.",
+                    hint=(
+                        "Choose a dataset from Raw, Uploaded, Processed, Trained "
+                        "or Forecast Data."
+                    ),
+                )
+            return meta
+        if meta.parent_dataset_id is None:
+            raise ValidationFailure("This split plan has no source dataset.")
+        source = await self.get(meta.parent_dataset_id)
+        if source.operation == "split":
+            raise ValidationFailure("A split plan must refer to observations, not another plan.")
+        if meta.provenance.get("split_dataset_checksum") != source.checksum:
+            raise ValidationFailure(
+                "This split plan was computed on a different version of its source dataset.",
+                hint="Recreate the plan in Chronological Splits against the current dataset.",
+            )
+        return source
 
     # ------------------------------------------------------------------ reads
 
@@ -242,7 +275,7 @@ class DatasetService:
             return self._persist(
                 parent,
                 frame,
-                name=name or f"{parent.name} (edited)",
+                name=name,
                 operation=operation,
                 detail={
                     "cell_edits": len(edits),
@@ -282,7 +315,7 @@ class DatasetService:
                 meta = self._persist(
                     parent,
                     cleaned,
-                    name=name or f"{parent.name} (cleaned)",
+                    name=name,
                     operation="clean",
                     detail={
                         "plan": {
@@ -405,8 +438,7 @@ class DatasetService:
                     frame,
                     # Named for what actually happened. A resample-only child called
                     # "... (merged)" would describe an input that does not exist.
-                    name=name
-                    or (f"{base.name} (merged)" if joins else f"{base.name} (resampled)"),
+                    name=name,
                     operation="merge" if joins else "resample",
                     detail={
                         "timeframe": timeframe.value if timeframe else None,
@@ -549,7 +581,7 @@ class DatasetService:
                 meta = self._persist(
                     parent,
                     result,
-                    name=name or f"{parent.name} (features)",
+                    name=name,
                     operation="features",
                     detail={
                         "selections": [
@@ -582,7 +614,7 @@ class DatasetService:
         parent: DatasetMeta,
         frame: pd.DataFrame,
         *,
-        name: str,
+        name: str | None,
         operation: str,
         detail: dict[str, Any],
         extra_provenance: dict[str, str] | None = None,
@@ -747,7 +779,15 @@ def resolved_path(meta: DatasetMeta, settings: Settings) -> Path:
     dataset written before the change still resolves, and "missing file" keeps meaning the
     file is missing rather than that our arithmetic disagrees with our history.
     """
-    path = Path(meta.storage_path)
+    # WSL's drive mount and the native Windows drive identify the same file. Keep
+    # the recorded suffix, including historical layouts, rather than substituting
+    # a file reconstructed from the dataset ID or the current category.
+    recorded = meta.storage_path
+    if os.name == "nt":
+        mount = re.fullmatch(r"/mnt/([a-zA-Z])/(.*)", recorded)
+        if mount:
+            recorded = f"{mount[1].upper()}:/{mount[2]}"
+    path = Path(recorded)
     if not path.is_absolute():
         path = settings.data_dir / path
     return path
@@ -760,7 +800,7 @@ def persist_dataset(
     data_dir: Path,
     catalog: Catalog,
     category: DatasetCategory,
-    name: str,
+    name: str | None,
     operation: str,
     detail: dict[str, Any],
     extra_provenance: dict[str, str] | None = None,
@@ -789,10 +829,14 @@ def persist_dataset(
     the choice being made on its behalf by a hardcoded constant.
     """
     new_id = dataset_id or parquet_store.new_dataset_id()
+    category = category_for(operation, category)
+    naming_parent = parent.model_copy(update={"timeframe": timeframe}) if timeframe else parent
+    naming_source = source_label(naming_parent)
+    custom_name = (name or "").strip()
     written = parquet_store.write_dataset(frame, data_dir, category, new_id)
     meta = DatasetMeta(
         dataset_id=new_id,
-        name=name,
+        name=custom_name or naming_source,
         category=category,
         source=parent.source,
         asset_class=parent.asset_class,
@@ -819,8 +863,10 @@ def persist_dataset(
             **(extra_provenance or {}),
             "derived_from": parent.dataset_id,
             "operation": operation,
+            "naming_source": naming_source,
         },
     )
+    meta = named_metadata(meta, custom=bool(custom_name))
     catalog.insert_dataset(meta)
     catalog.add_lineage(new_id, parent.dataset_id, operation, detail)
     for parent_id, parent_detail in extra_parents or []:

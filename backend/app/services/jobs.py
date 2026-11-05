@@ -30,7 +30,7 @@ import asyncio
 from collections.abc import Coroutine
 from typing import Any
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import JobNotFound, QuantmetricsError
 from app.models.enums import JobStatus
@@ -72,7 +72,7 @@ class JobService:
     """Create, advance, and read background jobs. Public methods are coroutines."""
 
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
 
     async def create(
@@ -116,6 +116,20 @@ class JobService:
             job_id,
             status=JobStatus.FAILED,
             error=error,
+            message=message,
+        )
+
+    async def progress(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any] | None = None,
+        message: str | None = None,
+    ) -> None:
+        await run_blocking(
+            self.catalog.update_job_progress,
+            job_id,
+            result=result,
             message=message,
         )
 

@@ -46,3 +46,19 @@ Thumbs.db
 # Local overrides
 .env
 .env.local
+
+# Temporary files and test-run data
+.tmp/
+
+# Generated artifacts and reports
+artifacts/
+reports/
+
+# Graphify generated output and cache
+graphify-out/
+
+# Runtime datasets and local databases
+backend/data/
+
+# TypeScript incremental build metadata
+*.tsbuildinfo

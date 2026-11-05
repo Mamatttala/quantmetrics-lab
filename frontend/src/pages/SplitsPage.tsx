@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -73,7 +74,6 @@ const PROPORTIONS: Record<string, string> = {
   percentage_60_20_20: "60% train · 20% validation · 20% test",
 };
 
-const ARTIFACT_OPERATIONS = new Set(["split", "scaler_params"]);
 
 function isDateSplit(splitType: SplitType): boolean {
   return splitType === "date_3way" || splitType === "date_2way";
@@ -119,6 +119,7 @@ export function SplitsPage() {
   const [splitType, setSplitType] = useState<SplitType>("percentage_70_15_15");
   const [dates, setDates] = useState<Record<string, string>>({});
   const [nFolds, setNFolds] = useState(5);
+  const [includeValidation, setIncludeValidation] = useState(false);
   const [gapSize, setGapSize] = useState(0);
   const [purge, setPurge] = useState(false);
   const [horizon, setHorizon] = useState("5");
@@ -141,8 +142,7 @@ export function SplitsPage() {
       setCandidates(
         rows.filter(
           (row) =>
-            row.row_count > 0 &&
-            !ARTIFACT_OPERATIONS.has(row.operation ?? ""),
+            row.row_count > 0 && row.artifact_kind === "observations",
         ),
       );
     } catch {
@@ -206,6 +206,7 @@ export function SplitsPage() {
   useEffect(() => {
     setDates({});
     setNFolds(5);
+    setIncludeValidation(false);
     setGapSize(0);
     setPurge(false);
     setHorizon("5");
@@ -272,9 +273,12 @@ export function SplitsPage() {
       purge_flag: purge,
       label_horizon_bars: purge ? Number.parseInt(horizon, 10) : null,
     };
-    if (isWalkForward(splitType)) built.n_folds = nFolds;
+    if (isWalkForward(splitType)) {
+      built.n_folds = nFolds;
+      built.include_validation = includeValidation;
+    }
     return built;
-  }, [splitType, requiredDates, dates, gapSize, purge, horizon, nFolds]);
+  }, [splitType, requiredDates, dates, gapSize, purge, horizon, nFolds, includeValidation]);
 
   // -------------------------------------------------------------------- run
 
@@ -294,8 +298,9 @@ export function SplitsPage() {
       const neverTested = created.report.rows_never_tested;
       setNotice({
         message:
-          `Plan stored as ${created.dataset.dataset_id} in outputs — ` +
-          `${created.plan.length} span(s) over ${created.report.rows.toLocaleString()} rows. ` +
+          `Plan stored in Outputs and ${created.partitions.length} observation partition(s) ` +
+          `stored in Processed Data — ${created.plan.length} span(s) over ` +
+          `${created.report.rows.toLocaleString()} rows. ` +
           (neverTested > 0
             ? `${neverTested.toLocaleString()} row(s) are in no test span.`
             : "Every row falls in some test span."),
@@ -322,9 +327,9 @@ export function SplitsPage() {
         lead={
           <>
             Describe a dataset as train, validation and test spans that never overlap in
-            time. A plan is a <strong>table of row ranges</strong> — the dataset itself is
-            not modified, re-written or copied, and the plan records the checksum of the
-            frame it was computed on so it can never be applied to a different one.
+            time. The boundary plan is saved under <strong>Outputs</strong>, while actual
+            train, validation and test rows are saved under <strong>Processed Data</strong>.
+            The source remains immutable and the plan records its checksum.
           </>
         }
       />
@@ -348,18 +353,20 @@ export function SplitsPage() {
               </option>
             ))}
           </select>
-          <p className="field__note">
+          <Description className="field__note">
             Split plans themselves are not offered here — a plan is a set of row indices,
             not a price series. The dataset must be sorted by its observation time.
-          </p>
+          </Description>
         </div>
       </div>
 
       {empty && (
         <div className="panel muted">
-          No dataset selected. A plan is computed from a stored dataset and saved to the{" "}
-          <span className="mono">outputs</span> library. Nothing in the source dataset is
-          touched.
+          No dataset selected.
+          <Description anchor=".panel">
+            The plan is saved to Outputs and its observation partitions are saved to
+            Processed Data under Chronological Splits. Nothing in the source is changed.
+          </Description>
         </div>
       )}
 
@@ -394,12 +401,12 @@ export function SplitsPage() {
                 {dataset.timeframe === null ? "no declared timeframe" : dataset.timeframe}
               </span>
             </div>
-            <div className="panel muted" style={{ fontSize: 12 }}>
+            <Description className="panel muted" style={{ fontSize: 12 }}>
               The spans below are laid out along the dataset&apos;s{" "}
               <strong>observation time</strong> — the instant a bar opens, never the instant
               it closes. Dating a span by bar-close would move the last bar of training into
               the test span, a one-bar leak with nothing in the resulting table to show it.
-            </div>
+            </Description>
           </div>
 
           <div className="section">
@@ -438,12 +445,12 @@ export function SplitsPage() {
                         />
                       </div>
                     ))}
-                    <p className="field__note">
+                    <Description className="field__note">
                       Read in this browser&apos;s timezone and sent as that exact instant in
                       UTC. Both ends are inclusive: a span runs from its first bar up to and
                       including its last. Gap and purge are not offered on a date split —
                       move the date instead, so nothing shrinks a span you named.
-                    </p>
+                    </Description>
                   </div>
                 )}
 
@@ -464,11 +471,24 @@ export function SplitsPage() {
                           onChange={(event) => setNFolds(Number(event.target.value))}
                           disabled={running}
                         />
-                        <p className="field__note">
-                          The series is cut into {nFolds + 1} equal blocks; fold <em>k</em>{" "}
-                          tests block <em>k</em>. The first block is never tested — it is
-                          the training data every fold starts from.
-                        </p>
+                        <Description className="field__note">
+                          The series is cut into {nFolds + (includeValidation ? 2 : 1)} blocks.
+                          {includeValidation
+                            ? " Each fold trains, validates on the next block, then tests the following block."
+                            : " Each fold trains and tests the next block, with no validation span."}
+                          {" "}Rolling uses one training block; expanding uses all preceding
+                          blocks. The final test includes any remainder.
+                        </Description>
+                        <label className="feature__keep" htmlFor="split-validation">
+                          <input
+                            id="split-validation"
+                            type="checkbox"
+                            checked={includeValidation}
+                            onChange={(event) => setIncludeValidation(event.target.checked)}
+                            disabled={running}
+                          />
+                          <span>Include validation</span>
+                        </label>
                       </div>
                     ) : (
                       <div className="field field--tight">
@@ -476,11 +496,11 @@ export function SplitsPage() {
                         <p className="mono muted" style={{ fontSize: 12 }}>
                           {PROPORTIONS[splitType] ?? ""}
                         </p>
-                        <p className="field__note">
+                        <Description className="field__note">
                           The cut rows are computed from this dataset&apos;s row count and
                           reported below — the counts are the engine&apos;s, not this
                           page&apos;s estimate of them.
-                        </p>
+                        </Description>
                       </div>
                     )}
 
@@ -498,12 +518,12 @@ export function SplitsPage() {
                         onChange={(event) => setGapSize(Number(event.target.value))}
                         disabled={running}
                       />
-                      <p className="field__note">
+                      <Description className="field__note">
                         Bars dropped between one span&apos;s end and the next span&apos;s
                         start. A feature computed over a trailing window at the end of
                         training still reaches into the first bars of the test span without
                         one.
-                      </p>
+                      </Description>
                     </div>
 
                     <div className="field field--tight">
@@ -515,7 +535,7 @@ export function SplitsPage() {
                           onChange={(event) => setPurge(event.target.checked)}
                           disabled={running}
                         />
-                        <span>Purge training rows whose label reaches past the cut</span>
+                        <span>Purge rows whose label reaches past the next cut</span>
                       </label>
                       {purge && (
                         <div className="field field--tight">
@@ -530,13 +550,13 @@ export function SplitsPage() {
                           />
                         </div>
                       )}
-                      <p className="field__note">
+                      <Description className="field__note">
                         A label with a forward horizon reads bars in the next span, so the
                         last rows of training are not really training data. The embargo and
                         the purge <strong>overlap rather than add up</strong>: the training
                         span ends at the cut minus whichever is larger, and the report below
                         states how many rows each rule actually removed.
-                      </p>
+                      </Description>
                     </div>
                   </div>
                 )}
@@ -547,7 +567,7 @@ export function SplitsPage() {
                 <input
                   id="split-name"
                   type="text"
-                  placeholder="(defaults to the source name plus the split type)"
+                  placeholder="leave blank for the standard generated name"
                   value={outName}
                   onChange={(event) => setOutName(event.target.value)}
                   disabled={running}
@@ -665,16 +685,18 @@ export function SplitsPage() {
                       <thead>
                         <tr>
                           <th>Fold</th>
+                          <th>Role</th>
                           <th>Cut at row</th>
                           <th>Embargo removed</th>
                           <th>Purge removed</th>
-                          <th>Training ends at</th>
+                          <th>Span ends at</th>
                         </tr>
                       </thead>
                       <tbody>
                         {result.report.boundaries.map((boundary) => (
                           <tr key={`${boundary.fold}-${boundary.role}`}>
                             <td className="mono">{boundary.fold}</td>
+                            <td className="mono">{boundary.role}</td>
                             <td className="mono">{boundary.cut_index}</td>
                             <td className="mono">{boundary.gap_rows_removed}</td>
                             <td className="mono">{boundary.purge_rows_removed}</td>
@@ -707,7 +729,7 @@ export function SplitsPage() {
                 >
                   open the plan table
                 </Link>
-                <Link className="btn btn--ghost btn--sm" to={`/scaling/${datasetId ?? ""}`}>
+                <Link className="btn btn--ghost btn--sm" to={`/scaling/${result.dataset.dataset_id}`}>
                   scale against this plan
                 </Link>
               </div>
@@ -722,9 +744,11 @@ export function SplitsPage() {
 
             {plans.length === 0 ? (
               <div className="panel muted">
-                No plan has been made from this dataset yet. C7 Scaling refuses to fit
-                min-max, standard or robust until one exists — fitting on the whole series
-                would carry the test span&apos;s statistics into every training row.
+                No plan has been made from this dataset yet.
+                <Description anchor=".panel">
+                  C7 Scaling can fit the entire dataset without a split. Create a plan
+                  here to fit scalers on training rows only during model evaluation.
+                </Description>
               </div>
             ) : (
               <table className="dtable">

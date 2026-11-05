@@ -339,11 +339,8 @@ check(
 
 by_id = {entry["id"]: entry for entry in options.get("scalers") or []}
 check(
-    "the three fitted scalers are unavailable, and say why",
-    all(by_id[name]["available"] is False for name in ("minmax", "standard", "robust"))
-    and all(
-        "split plan" in str(by_id[name]["reason"]) for name in ("minmax", "standard", "robust")
-    ),
+    "the three fitted scalers are available without a plan",
+    all(by_id[name]["available"] is True for name in ("minmax", "standard", "robust")),
     json.dumps({name: by_id[name]["reason"] for name in ("minmax", "standard", "robust")})[:260],
 )
 check(
@@ -642,11 +639,12 @@ check(
 print("== refusals ==")
 
 for scaler in ("minmax", "standard", "robust"):
-    status, payload = run_scaling(source_id, scaler, features=["close"])
+    payload = scale(source_id, scaler, features=["close"])
     check(
-        f"{scaler} without a split plan is refused before any job exists",
-        status == 422 and "split_plan_id" in message_of(payload),
-        f"status={status} {message_of(payload)[:140]}",
+        f"{scaler} without a split plan fits the entire dataset",
+        payload["status"] == "succeeded"
+        and payload["result"]["report"]["fit_role"] == "full_dataset",
+        str(payload.get("status")),
     )
 
 status, payload = run_scaling(

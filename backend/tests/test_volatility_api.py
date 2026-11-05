@@ -641,10 +641,10 @@ def test_the_saved_frame_holds_no_future_timestamps(
     assert len(finished["result"]["report"]["forward_paths"][0]["times"]) == 24
 
 
-def test_the_output_lands_in_outputs_under_a_new_dataset(
+def test_the_output_lands_in_forecast_data_under_a_new_dataset(
     client: TestClient, app_catalog: Catalog, data_dir: Path
 ) -> None:
-    """`outputs`, with the source named as parent and the source itself untouched."""
+    """`forecast_data`, with the source named as parent and the source untouched."""
     dataset_id = register(data_dir, price_frame())
     source_path = Path(
         app_catalog.conn.execute(
@@ -659,7 +659,7 @@ def test_the_output_lands_in_outputs_under_a_new_dataset(
     assert child_id != dataset_id
     child = app_catalog.get_dataset(child_id)
     assert child is not None
-    assert child.category is DatasetCategory.OUTPUTS
+    assert child.category is DatasetCategory.FORECAST
     assert child.parent_dataset_id == dataset_id
     assert child.row_count == 30
     assert child.timeframe is Timeframe.H1

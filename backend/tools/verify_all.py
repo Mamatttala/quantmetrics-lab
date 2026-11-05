@@ -35,7 +35,11 @@ def run(label: str, args: list[str], cwd: Path, timeout: int = 900) -> bool:
     # driver that had already passed every check. The parent reads the output back as
     # UTF-8, so both ends are told the same thing. It is passed explicitly rather than
     # inherited because the parent's own encoding is not what the child will use.
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    env = {
+        **os.environ,
+        "PYTHONIOENCODING": "utf-8",
+        "NODE_OPTIONS": os.environ.get("NODE_OPTIONS", "--no-experimental-webstorage"),
+    }
     completed = subprocess.run(
         args, cwd=cwd, text=True, encoding="utf-8", errors="replace", timeout=timeout, env=env
     )
@@ -47,13 +51,15 @@ def run(label: str, args: list[str], cwd: Path, timeout: int = 900) -> bool:
 
 def main() -> int:
     lint = "--no-lint" not in sys.argv
+    npm = "npm.cmd" if os.name == "nt" else "npm"
 
     if lint:
         run("ruff check .", [sys.executable, "-m", "ruff", "check", "."], ROOT)
         run("mypy app", [sys.executable, "-m", "mypy", "app"], ROOT)
         run("pytest", [sys.executable, "-m", "pytest", "-q"], ROOT)
-        run("npm run typecheck", ["npm.cmd", "run", "typecheck"], FRONTEND)
-        run("npm run build", ["npm.cmd", "run", "build"], FRONTEND)
+        run("npm test", [npm, "test"], FRONTEND)
+        run("npm run typecheck", [npm, "run", "typecheck"], FRONTEND)
+        run("npm run build", [npm, "run", "build"], FRONTEND)
 
     # The drivers need both processes. serve.py is idempotent: it stops whatever is
     # listening on its patterns and starts fresh, so this cannot accidentally exercise
@@ -65,9 +71,12 @@ def main() -> int:
     run("e2e_part_b.py", [sys.executable, "tools/e2e_part_b.py"], ROOT)
     run("e2e_part_b_merge.py", [sys.executable, "tools/e2e_part_b_merge.py"], ROOT)
     run("e2e_features.py", [sys.executable, "tools/e2e_features.py"], ROOT)
-    run("e2e_regime.py", [sys.executable, "tools/e2e_regime.py"], ROOT)
+    run(
+        "regime workflow", [sys.executable, "-m", "pytest", "tests/test_regimes_api.py", "-q"], ROOT
+    )
     run("e2e_splits.py", [sys.executable, "tools/e2e_splits.py"], ROOT)
     run("e2e_scaling.py", [sys.executable, "tools/e2e_scaling.py"], ROOT)
+    run("e2e_exploratory.py", [sys.executable, "tools/e2e_exploratory.py"], ROOT)
     run("e2e_volatility.py", [sys.executable, "tools/e2e_volatility.py"], ROOT)
     run("e2e_ui.py", [sys.executable, "tools/e2e_ui.py"], ROOT)
 

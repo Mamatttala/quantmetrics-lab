@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_regime_api import register
+from tests.helpers import register
 
 
 @pytest.fixture
@@ -71,9 +71,10 @@ def test_the_envelope_carries_the_dataset_the_plan_and_the_report(
     client: TestClient, dataset_id: str
 ) -> None:
     body = create(client, dataset_id)
-    assert set(body) == {"dataset", "plan", "report"}
+    assert set(body) == {"dataset", "plan", "partitions", "report"}
     assert body["dataset"]["operation"] == "split"
     assert body["dataset"]["category"] == "outputs"
+    assert {row["category"] for row in body["partitions"]} == {"processed_data"}
     assert isinstance(body["plan"], list)
     assert body["report"]["rows"] == 200
 
@@ -123,12 +124,41 @@ def test_tscv_parameters_round_trip_through_the_api(client: TestClient, dataset_
         client,
         dataset_id,
         split_type="tscv_expanding",
-        parameters={"n_folds": 3, "gap_size": 2, "purge_flag": True, "label_horizon_bars": 5},
+        parameters={
+            "n_folds": 3, "gap_size": 2, "purge_flag": True, "label_horizon_bars": 5,
+            "include_validation": True,
+        },
     )
     assert body["report"]["folds"] == 3
     assert body["report"]["parameters"]["n_folds"] == 3
+    assert body["report"]["parameters"]["include_validation"] is True
     assert body["report"]["boundaries"][0]["gap_rows_removed"] == 2
-    assert len(body["plan"]) == 6
+    assert len(body["plan"]) == 9
+    for fold in range(1, 4):
+        assert [row["role"] for row in body["plan"] if row["fold"] == fold] == [
+            "train", "val", "test"
+        ]
+
+
+@pytest.mark.parametrize("scheme", ["tscv_expanding", "tscv_rolling"])
+@pytest.mark.parametrize("choice", [None, False, True])
+def test_walk_forward_validation_is_opt_in(client, dataset_id, scheme, choice):
+    parameters = {"n_folds": 3}
+    if choice is not None:
+        parameters["include_validation"] = choice
+    body = create(client, dataset_id, split_type=scheme, parameters=parameters)
+    roles = ["train", "val", "test"] if choice else ["train", "test"]
+    assert body["report"]["parameters"]["include_validation"] is bool(choice)
+    for fold in range(1, 4):
+        assert [row["role"] for row in body["plan"] if row["fold"] == fold] == roles
+
+
+def test_validation_toggle_is_rejected_for_non_walk_forward_plans(client, dataset_id):
+    response = client.post("/api/splits/create", json={
+        "dataset_id": dataset_id, "split_type": "percentage_70_15_15",
+        "parameters": {"include_validation": True},
+    })
+    assert response.status_code == 422
 
 
 def test_a_date_split_accepts_its_dates(client: TestClient, dataset_id: str) -> None:

@@ -1,8 +1,9 @@
-import { NavLink } from "react-router-dom";
-
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { Link, NavLink, useLocation } from "react-router-dom";
+import { Fragment } from "react";
+import { D_SECTIONS } from "./regimeNavigation";
 
 import { NAV_GROUPS, UTILITY_NAV, type NavEntry } from "./registry";
+import { useResizablePane } from "./useResizablePane";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -27,12 +28,16 @@ function NavRow({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {
 }
 
 export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
+  const location = useLocation();
+  const { width, resizeHandleProps } = useResizablePane("qca.ui.sidebarWidth", 220, collapsed);
   return (
-    <aside className={collapsed ? "sidebar sidebar--collapsed" : "sidebar"}>
+    <aside
+      className={collapsed ? "sidebar sidebar--collapsed" : "sidebar"}
+      style={collapsed ? undefined : { width }}
+    >
       <div className="sidebar__header">
         <span className="sidebar__brand">Quantmetrics Lab</span>
         <div className="sidebar__header-actions">
-          <ThemeToggle />
           <button
             type="button"
             className="sidebar__collapse"
@@ -55,11 +60,22 @@ export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
           <div className="sidebar__group" key={group.heading}>
             {!collapsed && <div className="sidebar__heading">{group.heading}</div>}
             {group.entries.map((entry) => (
-              <NavRow key={entry.id} entry={entry} collapsed={collapsed} />
+              <Fragment key={entry.id}>
+                <NavRow entry={entry} collapsed={collapsed} />
+                {!collapsed && Object.entries(D_SECTIONS).map(([key, group]) => entry.path === `/regime/${key}` && location.pathname === entry.path ?
+                  <div key={key} className="regime-subnav">{group.sections.map(([id, label]) =>
+                    <Link key={id} to={`${entry.path}${location.search}#${id}`} aria-current={location.hash === `#${id}` ? "page" : undefined}>{label}</Link>
+                  )}</div> : null)}
+              </Fragment>
             ))}
           </div>
         ))}
       </nav>
+      {!collapsed && <div
+        {...resizeHandleProps}
+        className="pane-resize sidebar__resize"
+        aria-label="Resize Sidebar Menu"
+      />}
     </aside>
   );
 }

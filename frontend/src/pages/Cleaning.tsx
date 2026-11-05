@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -100,7 +101,7 @@ export function Cleaning() {
   const loadCandidates = useCallback(async () => {
     try {
       const rows = await api.listDatasets();
-      setCandidates(rows.filter((dataset) => dataset.row_count > 0));
+      setCandidates(rows.filter((dataset) => dataset.row_count > 0 && dataset.artifact_kind === "observations"));
     } catch {
       setCandidates([]);
     }
@@ -293,7 +294,7 @@ export function Cleaning() {
   const empty = datasetId === undefined;
 
   return (
-    <div className="page">
+    <div className="page page--cleaning">
       <PageHeader
         title="Cleaning"
         lead={
@@ -329,9 +330,12 @@ export function Cleaning() {
 
       {empty && (
         <div className="panel muted">
-          No dataset selected. Pick one above, or click a dataset in the Data Explorer
-          and open it here. A dataset cleaned here lands in <strong>processed_data</strong>{" "}
-          and keeps <strong>parent_dataset_id</strong> pointing at its source.
+          No dataset selected.
+          <Description anchor=".panel">
+            Pick one above, or click a dataset in the Data Explorer
+            and open it here. A dataset cleaned here lands in <strong>processed_data</strong>{" "}
+            and keeps <strong>parent_dataset_id</strong> pointing at its source.
+          </Description>
         </div>
       )}
 
@@ -540,10 +544,10 @@ export function Cleaning() {
                           ({plan.outlierColumns.length} selected)
                         </span>
                       </label>
-                      <p className="field__note">
+                      <Description className="field__note">
                         Numeric columns only. A column with empty cells shows its count —
                         a fence computed over few observations is a weak fence.
-                      </p>
+                      </Description>
                       {outlierCandidates.length === 0 ? (
                         <div className="result__bar result__bar--error" style={{ margin: 0 }}>
                           <span>
@@ -592,10 +596,10 @@ export function Cleaning() {
                             }))
                           }
                         />
-                        <p className="field__note">
+                        <Description className="field__note">
                           Fences at Q1 − k·IQR and Q3 + k·IQR. 1.5 is the conventional
                           choice; 3.0 marks only far-out values.
-                        </p>
+                        </Description>
                       </div>
                     ) : (
                       <div className="row">
@@ -633,11 +637,11 @@ export function Cleaning() {
                             }
                           />
                         </div>
-                        <p className="field__note" style={{ flex: "1 1 260px" }}>
+                        <Description className="field__note" style={{ flex: "1 1 260px" }}>
                           The conventional 0.01/0.99 pair clamps roughly 2% of every
                           column it is applied to. Widen the interval to treat only
                           genuinely extreme values.
-                        </p>
+                        </Description>
                       </div>
                     )}
                   </div>
@@ -656,13 +660,13 @@ export function Cleaning() {
                   />
                   <span className="policy__body">
                     <span className="policy__label">Sort rows by timestamp first</span>
-                    <span className="policy__detail muted">
+                    <Description className="policy__detail muted">
                       A stable ascending sort by{" "}
                       {quality.time_column || "the timestamp column"}. Needed before
                       “keep the first” or “keep the last” per timestamp means anything:
                       on an unsorted file those words describe the row order in the file,
                       not in time. Ties keep their original order.
-                    </span>
+                    </Description>
                   </span>
                 </label>
               </fieldset>
@@ -681,7 +685,7 @@ export function Cleaning() {
                 <input
                   id="out-name"
                   type="text"
-                  placeholder="(defaults to the source name plus “cleaned”)"
+                  placeholder="leave blank for the standard generated name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
@@ -723,13 +727,13 @@ export function Cleaning() {
               </div>
             )}
 
-            <div className="panel muted" style={{ fontSize: 12 }}>
+            <Description className="panel muted" style={{ fontSize: 12 }}>
               Preview runs the whole plan against the real file and throws the result
               away — the same code path as saving, so the two cannot disagree. Saving
               writes a new <strong>processed_data</strong> dataset; the fences and the
               plan are recorded in its provenance so a later reader can audit what was
               done to the data.
-            </div>
+            </Description>
           </div>
 
           {/* ========================================================== result */}
@@ -896,7 +900,7 @@ export function Cleaning() {
                       className="btn btn--ghost btn--sm"
                       onClick={() =>
                         window.open(
-                          `/api/datasets/${result.dataset?.dataset_id}/export?format=${format}`,
+                          api.datasetExportUrl(result.dataset!.dataset_id, format),
                         )
                       }
                     >

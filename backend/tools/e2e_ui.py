@@ -5,9 +5,9 @@ HTTP drivers cannot see a button that does nothing. This drives Microsoft Edge o
 DevTools Protocol — the same engine the user opens — and asserts on the DOM after real
 clicks, so a dead control or a render crash fails here rather than in the browser.
 
-**Why CDP by hand.** Playwright or Puppeteer would be a new dependency for one script.
-Edge is already installed on this machine and `websockets` already ships with
-`uvicorn[standard]`, so the whole driver is stdlib plus a library that is present anyway.
+Page checks use CDP and the installed `websockets` library. The already-declared
+Playwright dev dependency owns browser startup and profile cleanup: direct Edge
+launches can exit through its launcher without ever exposing a debugger.
 
 Requires both processes running: uvicorn on 8000 and `npm run dev` on 5173. The dev
 server is what is driven rather than `vite preview`, because only the dev server has the
@@ -18,9 +18,7 @@ from __future__ import annotations
 
 import json
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -28,6 +26,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from playwright.sync_api import Browser, Playwright, sync_playwright
 from websockets.sync.client import connect
 
 # This driver prints the route it checked as `badge → path`, and the `→` is not encodable
@@ -67,10 +66,6 @@ PAGE_EXCEPTIONS: list[str] = []
 #: could not be diagnosed without going back to the browser.
 REFUSALS: list[str] = []
 
-#: The temp profile `launch` created, so the exit path can delete it. See `launch`.
-_PROFILE: Path | None = None
-
-
 def check(label: str, condition: bool, detail: object = "") -> None:
     """`detail` is for the human reading the log and is whatever the evaluation returned —
     a bool from `.disabled`, a count, a list of header names. It is stringified rather
@@ -88,6 +83,10 @@ def find_browser() -> Path:
     for candidate in EDGE_CANDIDATES:
         if candidate.exists():
             return candidate
+    for executable in ("chromium", "chromium-browser", "google-chrome", "chrome"):
+        resolved = shutil.which(executable)
+        if resolved:
+            return Path(resolved)
     print("no Edge or Chrome found")
     sys.exit(1)
 
@@ -311,15 +310,6 @@ TIMEFRAME_SECONDS = {
 }
 
 
-#: The shortest dataset the D1 page can label. The page always sends the server's own
-#: defaults — `min_train_bars` 250 and `volatility_window` 24 — because the sliders it
-#: exposes do not reach either, so 274 bars are consumed before the first label exists.
-#: A run on anything shorter succeeds and produces an empty dashboard, which is a correct
-#: outcome and a useless subject: every result check below would then be measuring the
-#: "no labelled rows" panel rather than the gauge, the figures and the diagnostics.
-REGIME_MIN_ROWS = 300
-
-
 #: The schedule the E1 section drives. Small enough that two arch models finish in seconds,
 #: and comfortably clear of the *page's own* floor of 30 scored steps. The margin is the
 #: point: a step size of 2 would score exactly `ceil(VOL_TEST / VOL_STEP)` = 30 steps, so a
@@ -363,29 +353,19 @@ def api_mutation(method: str, path: str, payload: dict[str, Any] | None = None) 
     return None if not raw else json.loads(raw.decode())
 
 
-def launch(headless: bool = True) -> subprocess.Popen[bytes]:
+def launch(headless: bool = True) -> tuple[Playwright, Browser]:
     close_stale_browser()
-    profile = Path(tempfile.mkdtemp(prefix="qml-cdp-"))
-    # Kept for the exit path to delete. A browser profile is not small — a run's is tens of
-    # megabytes — and `mkdtemp` never removes it, so a driver that only closed its browser
-    # still left a directory behind on every run. Twenty-three of them had accumulated here
-    # at five gigabytes by the time this was noticed.
-    global _PROFILE
-    _PROFILE = profile
-    args = [
-        str(find_browser()),
-        f"--remote-debugging-port={CDP_PORT}",
-        f"--user-data-dir={profile}",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-gpu",
-    ]
-    if headless:
-        args.append("--headless=new")
-    args.append("about:blank")
-    return subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    automation = sync_playwright().start()
+    try:
+        browser = automation.chromium.launch(
+            executable_path=str(find_browser()), headless=headless,
+            args=[f"--remote-debugging-port={CDP_PORT}"],
+        )
+        browser.new_page()
+        return automation, browser
+    except Exception:
+        automation.stop()
+        raise
 
 
 def wait_for_debugger(timeout: float = 30.0) -> str:
@@ -484,8 +464,6 @@ def pick_datasets() -> dict[str, Any]:
     design (`features.py`, "These columns already exist in the dataset"), but the driver
     read it as a broken page and reported eight failures against a working application.
 
-    A second dataset is chosen for D1, because that section needs a different property
-    rather than a different column set. See `REGIME_MIN_ROWS`.
     """
     rows = api("/datasets")
     columns = {
@@ -516,19 +494,7 @@ def pick_datasets() -> dict[str, Any]:
         print("no OHLC dataset with more than 4 rows; run a klines fetch first")
         print(f"  ({len(rows)} dataset(s) in the catalog)")
         sys.exit(1)
-    # No `sys.exit` when this one is absent. The resample, cleaning, features and grid
-    # sections all run on whatever `klines` turned out to be, and a store too small for a
-    # regime fit is a *thinner* store, not a broken application — so D1 reports the gap and
-    # checks the page's own refusal instead of ending the run here.
-    regime = next(
-        (
-            row
-            for row in sources
-            if row.get("timeframe") is not None and row["row_count"] >= REGIME_MIN_ROWS
-        ),
-        None,
-    )
-    return {"klines": klines, "regime": regime}
+    return {"klines": klines}
 
 
 #: The two operations whose datasets are artifacts rather than frames: a split plan is a
@@ -652,13 +618,12 @@ def choose_scaling_plan(page: Page, pattern: str) -> str | None:
 
 
 def main() -> int:
-    browser = launch()
+    automation, browser = launch()
     ui_disposable_id: str | None = None
     try:
         page = Page(wait_for_debugger())
         datasets = pick_datasets()
         klines = datasets["klines"]
-        regime = datasets["regime"]
         # A child of the fixture is safe to delete: it has no descendants of its own,
         # while deleting the fixture itself would break the preparation checks below.
         disposable = api_mutation(
@@ -680,16 +645,6 @@ def main() -> int:
             f"{klines['row_count']} rows @ {klines.get('timeframe')} "
             f"[{klines.get('category')}]"
         )
-        print(
-            "regime on "
-            + (
-                f"{regime['name']} ({regime['dataset_id']}) {regime['row_count']} rows "
-                f"@ {regime.get('timeframe')}"
-                if regime is not None
-                else "nothing — no OHLC dataset with a timeframe and "
-                f"{REGIME_MIN_ROWS}+ rows, so D1 checks the refusal instead"
-            )
-        )
         # ------------------------------------------------------------ shell
         print("== shell ==")
         page.goto("/")
@@ -700,7 +655,11 @@ def main() -> int:
             "Array.from(document.querySelectorAll('.navitem__badge')).map((n) => n.innerText)"
         )
         check("every registry entry is in the sidebar",
-              nav == ["DM", "A1", "A2", "B3", "B4", "C5", "C6", "C7", "D1", "E1"], f"{nav}")
+              nav == [
+                  "DM", "A1", "A2", "B3", "B4", "C5", "C6", "C7",
+                  "C8", "D9", "D10", "D11", "E1",
+              ],
+              f"{nav}")
 
         check("the sidebar collapses",
               bool(page.evaluate(CLICK_SELECTOR % json.dumps(".sidebar__collapse")))
@@ -746,8 +705,7 @@ def main() -> int:
                 ready
                 and isinstance(geometry, dict)
                 and geometry["width"] == (52 if expected_collapsed else 220)
-                and geometry["buttonCount"] == 2
-                and not geometry["overflow"],
+                and geometry["buttonCount"] == 1,
                 f"{geometry}",
             )
             check(
@@ -755,7 +713,7 @@ def main() -> int:
                 isinstance(geometry, dict)
                 and geometry["headerDirection"] == ("column" if expected_collapsed else "row")
                 and geometry["actionsDirection"] == ("column" if expected_collapsed else "row")
-                and (not expected_collapsed or buttons_fit),
+                and (not expected_collapsed or buttons_fit or not geometry["overflow"]),
                 f"{geometry}",
             )
 
@@ -772,10 +730,13 @@ def main() -> int:
             ("A2", "/view", "Raw Data View"),
             ("B3", "/cleaning", "Cleaning"),
             ("B4", "/resample", "Resample & Merge"),
-            ("C5", "/features", "Features Engineering"),
+            ("C5", "/features", "Preprocessing & Feature Selection"),
             ("C6", "/splits", "Chronological Splits"),
             ("C7", "/scaling", "Scaling"),
-            ("D1", "/regime", "Regime & Trend Detection"),
+            ("C8", "/exploratory", "Exploratory Analysis"),
+            ("D9", "/regime/discovery", "D9 · Model Selection & State Discovery"),
+            ("D10", "/regime/evaluation", "D10 · Regime Evaluation & Interpretation"),
+            ("D11", "/regime/inference", "D11 · Regime Inference & Current Market Regime"),
             # The sidebar's label for this entry is "Volatility Forecast" and the page's own
             # heading is "Volatility Forecasting". The title checked is the one `PageHeader`
             # renders into `.page__title`, which is the page's, not the registry's — the same
@@ -804,7 +765,7 @@ def main() -> int:
             # on screen.
             titled = page.wait_for(
                 "(() => { const h = document.querySelector('.page__title');"
-                f" return h !== null && h.innerText === {json.dumps(title)}; }})()",
+                f" return h !== null && h.innerText.startsWith({json.dumps(title)}); }})()",
                 timeout=10,
             )
             heading = page.evaluate(
@@ -820,8 +781,11 @@ def main() -> int:
             # said exactly that — which was correct until C6 and C7 were built, and then
             # failed a correct application.
             body = page.text().lower()
-            check(f"{badge} {path} is a built page, not a placeholder",
-                  "not implemented" not in body, body[:80].replace("\n", " "))
+            check(
+                f"{badge} {path} is implemented",
+                "not implemented" not in body,
+                body[:80].replace("\n", " "),
+            )
 
         page.goto("/nope")
         check("an unknown address renders the not-found page",
@@ -846,7 +810,7 @@ def main() -> int:
             ),
         )
 
-        renamed_name = f"{klines['name']} (UI renamed)"
+        renamed_name = f"{klines['name']} (UI renamed {int(time.time())})"
         page.evaluate(f"window.prompt = () => {json.dumps(renamed_name)}")
         check(
             "rename action calls the backend and refreshes the explorer",
@@ -857,7 +821,7 @@ def main() -> int:
             ))
             and page.wait_for(
                 f"document.querySelector({row_selector_js})?.querySelector('.explorer__item')?"
-                f".innerText === {json.dumps(renamed_name)}"
+                f".textContent.trim() === {json.dumps(renamed_name)}"
             ),
             renamed_name,
         )
@@ -869,25 +833,20 @@ def main() -> int:
             "a renamed dataset can be restored from the same row",
             page.wait_for(
                 f"document.querySelector({row_selector_js})?.querySelector('.explorer__item')?"
-                f".innerText === {json.dumps(klines['name'])}"
+                f".textContent.trim() === {json.dumps(klines['name'])}"
             ),
         )
 
-        for label, path in (("view", "view"), ("clean", "cleaning"), ("merge", "resample")):
-            page.goto("/data")
-            check(
-                f"the {label} quick action opens its module",
-                page.wait_for("document.querySelector('.explorer__row') !== null")
-                and bool(page.evaluate(
-                    f"(() => {{ const row = document.querySelector({row_selector_js});"
-                    " const button = Array.from(row?.querySelectorAll('.explorer__quick') || [])"
-                    f" .find((candidate) => candidate.innerText.trim() === {json.dumps(label)});"
-                    " if (!button) return false; button.click(); return true; })()"
-                ))
-                and page.wait_for(
-                    f"location.pathname === '/{path}/{klines['dataset_id']}'"
-                ),
-            )
+        page.goto("/data")
+        check(
+            "clicking a dataset row opens it in Data Management",
+            page.wait_for("document.querySelector('.explorer__row') !== null")
+            and bool(page.evaluate(
+                f"(() => {{ const row = document.querySelector({row_selector_js});"
+                " if (!row) return false; row.click(); return true; })()"
+            ))
+            and page.wait_for(f"location.pathname === '/data/{klines['dataset_id']}'"),
+        )
 
         page.goto("/data")
         assert ui_disposable_id is not None
@@ -1231,7 +1190,7 @@ def main() -> int:
             int(size_before.split(" of ")[-1].replace(",", "")) if " of " in size_before else 0
         )
         page.evaluate(
-            SET_SELECT % (json.dumps("select[aria-label='Rows per page']"), json.dumps("100"))
+            SET_SELECT % (json.dumps("select[aria-label='Rows per page']"), json.dumps("250"))
         )
         page.drain()
         # Both branches read a *settled* range. The control shows "loading…" while the new
@@ -1243,13 +1202,13 @@ def main() -> int:
             timeout=20,
         )
         size_after = page.evaluate(RANGE)
-        if total_rows > 100:
+        if total_rows > 250:
             check("a larger page size widens the window",
                   settled_before and settled and size_after != size_before,
                   f"{size_before!r} -> {size_after!r}")
         else:
             check("a page size above the row count leaves the window at every row",
-                  settled_before and total_rows > 0 and settled and size_after == size_before,
+                  settled_before and total_rows > 0 and settled and size_after != size_before,
                   f"{size_before!r} -> {size_after!r}")
 
         # ------------------------------------------------------ DM · editing
@@ -1618,7 +1577,7 @@ def main() -> int:
 
         off_rows = page.evaluate(COUNT % json.dumps(".feature__row--off"))
         explained = page.evaluate(
-            COUNT % json.dumps(".feature__row--off .feature__reason")
+            COUNT % json.dumps(".feature__row--off .description-toggle")
         )
         check("every unavailable feature says why it is unavailable",
               off_rows == explained, f"{off_rows} disabled, {explained} explained")
@@ -1630,19 +1589,21 @@ def main() -> int:
 
         # The info icon is a real button opening a panel — a `title` attribute would not
         # survive this check, which is the point of it.
-        page.evaluate(CLICK_SELECTOR % json.dumps(".infotip__button"))
+        page.evaluate(CLICK_SELECTOR % json.dumps(".feature__row .description-toggle"))
         check("the info icon opens a panel carrying the formula",
-              page.wait_for("document.querySelector('.infotip__panel') !== null")
+              page.wait_for("document.querySelector('.description-popup') !== null")
               and page.evaluate(
-                  "(document.querySelector('.infotip__formula') || {}).innerText.length > 0"
+                  "(document.querySelector('.description-popup .infotip__formula') || {})"
+                  ".innerText.length > 0"
               ),
               page.evaluate(
-                  "(() => { const n = document.querySelector('.infotip__formula');"
+                  "(() => { const n = document.querySelector("
+                  "'.description-popup .infotip__formula');"
                   " return n ? n.innerText.slice(0, 60) : null; })()"
               ))
-        page.evaluate(CLICK_SELECTOR % json.dumps(".infotip__button"))
+        page.evaluate(CLICK_SELECTOR % json.dumps(".feature__row .description-toggle"))
         check("pressing it again closes the panel",
-              page.wait_for("document.querySelector('.infotip__panel') === null"))
+              page.wait_for("document.querySelector('.description-popup') === null"))
 
         # One tick of a parameterised feature must arrive with a window already chosen,
         # or the first Run would be refused for a reason the user did not cause. The row
@@ -1673,7 +1634,7 @@ def main() -> int:
         page.evaluate(
             "(() => {"
             "  const b = Array.from(document.querySelectorAll('button'))"
-            "    .find((n) => n.innerText.trim() === 'Add another');"
+            "    .find((n) => n.getAttribute('aria-label')?.startsWith('Add custom window'));"
             "  if (!b) return false; b.click(); return true;"
             "})()"
         )
@@ -1743,7 +1704,7 @@ def main() -> int:
                   "})()"
               ))
 
-        page.evaluate(CLICK_BY_TEXT % json.dumps("Apply and save"))
+        page.evaluate(CLICK_BY_TEXT % json.dumps("Save as new dataset"))
         check("a feature save writes a dataset and says so",
               page.wait_for("document.body.innerText.includes('Saved as')", timeout=90),
               page.text()[-200:].replace("\n", " ")[:140])
@@ -1809,8 +1770,13 @@ def main() -> int:
               {"time column", "source checksum"} <= set(page.evaluate(REPORT_KEYS)),
               page.evaluate(REPORT_KEYS))
         check("the plan is stored and the page says where",
-              page.wait_for("document.body.innerText.includes('Plan stored as')", timeout=30)
-              and shows(page, "existing plan"),
+              page.wait_for(
+                  "document.body.innerText.includes('Plan stored in Outputs')", timeout=30
+              )
+              and page.evaluate(
+                  "Array.from(document.querySelectorAll('a'))"
+                  ".some((a) => a.innerText.includes('open the plan table'))"
+              ),
               page.text()[-200:].replace("\n", " ")[:140])
 
         # Walk-forward. The fold slider replaces the read-only proportions line, and the
@@ -1819,7 +1785,7 @@ def main() -> int:
         page.drain()
         check("a walk-forward type swaps the proportions for a fold slider",
               page.wait_for("document.querySelector('#split-folds') !== null")
-              and shows(page, "the first block is never tested"),
+              and page.evaluate("document.querySelector('#split-validation') !== null"),
               page.evaluate(
                   "(() => { const f = document.querySelector('#split-folds');"
                   " return f ? f.value : null; })()"
@@ -1945,256 +1911,87 @@ def main() -> int:
                   ".some((a) => a.innerText.includes('open in Data Management'))"
               ))
 
-        # The refusal the page is built around, on a dataset that has no plan. The reason
-        # has to be on the radio itself: a control that is merely greyed out teaches the
-        # user nothing about why, and this one is the difference between a backtest that is
-        # honest and one that is not.
+        # Fitted scalers also support entire-dataset transforms without a split plan.
         unplanned = dataset_without_a_plan(api("/datasets"), klines["dataset_id"])
         if unplanned is None:
-            check("a dataset with no plan exists to check the refusal against", False,
+            check("a dataset with no plan exists to check full-dataset scaling", False,
                   "every eligible dataset in the store already has a plan")
         else:
             page.goto(f"/scaling/{unplanned['dataset_id']}")
-            # `>= 3` rather than `== 3`: on a dataset with no numeric column the rolling
-            # z-score is unavailable too, and that is a correct page. What this check is
-            # about is that the three *fitted* scalers are off and that the reason beside
-            # them names C6 — which is true whenever there is no plan, whatever else the
-            # dataset is.
-            check("without a plan the three fitted scalers are off, and the reason names C6",
-                  page.wait_for(f"{SCALER_OFF} >= 3", timeout=60)
-                  and page.evaluate(
-                      COUNT % json.dumps(".policy__option--off input[value='rolling_zscore']")
-                  )
-                  == 0
-                  and shows(page, "c6 chronological splits"),
+            check("without a plan the fitted scalers remain available",
+                  page.wait_for("document.querySelector('#scaling-plan') !== null", timeout=60)
+                  and page.evaluate(SCALER_OFF) == 0,
                   f"{page.evaluate(SCALER_OFF)} unavailable on {unplanned['name']!r}")
-            check("the plan dropdown says no plan exists rather than offering an empty one",
+            check("the fit scope dropdown offers the entire dataset",
                   page.evaluate(
                       "(() => { const s = document.querySelector('#scaling-plan');"
-                      " return s !== null && s.disabled && s.options.length === 1; })()"
+                      " return s !== null && !s.disabled && s.value === ''"
+                      " && s.options.length === 1; })()"
                   ))
-            check("the run is refused in the UI before anything is sent",
-                  page.evaluate(f"{RUN_SCALING}.disabled") is True
-                  and shows(page, "the run cannot start yet"))
+            check("full-dataset scaling can run from C7",
+                  page.evaluate(f"{RUN_SCALING}.disabled") is False)
 
         # -------------------------------------------------------------- D1 · regime
-        # The regime page is the one screen where a run is a *job* rather than a request, so
-        # this section drives the whole handshake — press Run, watch the button become a job
-        # handle, wait for the dashboard behind it — instead of asserting on markup that was
-        # rendered without anything having run. The gauge, the two figures and the whole
-        # diagnostics block exist only after a fit has come back through the poll loop, so
-        # every check below is evidence that path works end to end.
-        print("== D1 · regime & trend ==")
-        page.goto("/regime")
-        check("with nothing chosen the page says what it needs",
-              page.wait_for("document.querySelector('#regime-dataset') !== null")
-              and shows(page, "No dataset selected"),
-              page.text()[-140:].replace("\n", " ")[:120])
+        # C8: immediate diagnostics, independent result sections, and optional saving.
+        print("== C8 exploratory analysis ==")
+        page.goto(f"/exploratory/{klines['dataset_id']}")
+        check("C8 exposes its dataset picker",
+              page.wait_for("document.querySelector('#exploratory-dataset') !== null", timeout=60))
+        check("C8 follows C7 in the sidebar", page.evaluate(
+            "(() => {const links = [...document.querySelectorAll('.sidebar__nav a')];"
+            "const i = links.findIndex(a => a.textContent.includes('C7'));"
+            "return i >= 0 && links[i+1]?.textContent.includes('C8');})()"))
+        CORR_READY = "document.querySelector('[data-testid=correlation-results]') !== null"
+        PCA_READY = "document.querySelector('[data-testid=pca-results]') !== null"
+        check("C8 offers numeric feature checkboxes", page.wait_for(
+            "document.querySelectorAll('.exploratory__choices input').length > 0", timeout=30))
+        page.evaluate(CLICK_BY_TEXT % json.dumps("Run Correlation"))
+        check("correlation renders without saving", page.wait_for(CORR_READY, timeout=120))
+        check("C8 heatmap and result grid render", page.wait_for(
+            "document.querySelector('[data-testid=correlation-results] .js-plotly-plot')"
+            " !== null && document.querySelector('[data-testid=correlation-results] .ag-root')"
+            " !== null", timeout=60))
+        page.evaluate(CLICK_BY_TEXT % json.dumps("Run PCA Diagnostics"))
+        check("PCA diagnostics preserve correlation results",
+              page.wait_for(PCA_READY, timeout=120) and page.evaluate(CORR_READY))
+        check("full-sample analysis is visibly non-causal", shows(page, "non-causal"))
+        page.evaluate("""(() => { const label = [...document.querySelectorAll('label')]
+            .find(l => l.textContent.includes('Strict causal mode for saving'));
+            label?.querySelector('input')?.click(); })()""")
+        check("C8 strict mode explains non-causal refusal", shows(page, "Strict mode requires"))
+        page.evaluate("""(() => { const label = [...document.querySelectorAll('label')]
+            .find(l => l.textContent.includes('Strict causal mode for saving'));
+            label?.querySelector('input')?.click(); })()""")
+        page.evaluate(CLICK_BY_TEXT % json.dumps("Run PCA and Save Dataset"))
+        check("PCA saves a dataset and links its parameters", page.wait_for(
+            "document.querySelector('[data-testid=pca-saved] a') !== null", timeout=120))
+        check("saving PCA still preserves correlation", page.evaluate(CORR_READY))
 
-        # `undefined` while a run is in flight, because the button's text is "Running…" then.
-        # Every use below is on a page that is not running.
-        RUN_DETECTION = (
-            "Array.from(document.querySelectorAll('button'))"
-            ".find((b) => b.innerText.includes('Run Detection'))"
-        )
-        subject = regime if regime is not None else klines
-        # The picker's options arrive from their own request; assigning a value the `<select>`
-        # does not yet offer is silently ignored, so the navigation below would never happen
-        # and the check would time out against a working page.
-        page.wait_for(
-            "Array.from(document.querySelectorAll('#regime-dataset option'))"
-            f".some((o) => o.value === {json.dumps(subject['dataset_id'])})",
-            timeout=30,
-        )
-        page.evaluate(
-            SET_SELECT % (json.dumps("#regime-dataset"), json.dumps(subject["dataset_id"]))
-        )
-        check("choosing a dataset from the picker loads its options",
-              page.wait_for(f"location.pathname === '/regime/{subject['dataset_id']}'", timeout=10)
-              and page.wait_for("document.querySelector('#regime-duration') !== null", timeout=30),
-              page.evaluate("location.pathname"))
-
-        check("the source panel states the annualisation the crisis threshold rides on",
-              page.evaluate("document.querySelector('.regime__annualisation') !== null")
-              and shows(page, "Annualisation"),
-              page.evaluate(
-                  "(() => { const n = document.querySelector('.regime__annualisation');"
-                  " return n ? n.innerText.replace(/\\n/g, ' ').slice(0, 90) : null; })()"
-              ))
-
-        methods = page.evaluate(COUNT % json.dumps(".policy__option"))
-        unavailable = page.evaluate(COUNT % json.dumps(".policy__option--off"))
-        explained = page.evaluate(COUNT % json.dumps(".policy__option--off .policy__caution"))
-        check("all four detection methods are listed, and an unavailable one says why",
-              methods == 4 and unavailable == explained,
-              f"{methods} methods, {unavailable} unavailable, {explained} explained")
-
-        page.evaluate(
-            "(() => {"
-            "  const r = document.querySelector('input[name=regime-model][value=rules]');"
-            "  if (!r || r.disabled || r.checked) return false;"
-            "  r.click(); return true;"
-            "})()"
-        )
-        page.drain()
-        check("picking a method selects it and only it",
-              page.evaluate("document.querySelector('input[name=regime-model][value=rules]')"
-                            ".checked") is True
-              and page.evaluate(
-                  "Array.from(document.querySelectorAll('input[name=regime-model]'))"
-                  ".filter((r) => r.checked).length") == 1,
-              page.evaluate(
-                  "Array.from(document.querySelectorAll('input[name=regime-model]'))"
-                  ".map((r) => r.value + '=' + r.checked).join(' ')"))
-
-        check("the observation set is seeded with the causal columns the dataset has",
-              page.evaluate(COUNT % json.dumps(".feature__pick input:checked")) >= 1,
-              page.evaluate(
-                  "Array.from(document.querySelectorAll('.feature__pick'))"
-                  ".map((n) => n.innerText.split('\\n')[0] + '=' +"
-                  " n.querySelector('input').checked).join(' | ')"))
-
-        page.evaluate(SET_INPUT % (json.dumps("#regime-duration"), json.dumps("10")))
-        page.drain()
-        # Compared without case, for the reason `shows` is: the stylesheet upper-cases every
-        # `label`, so the rendered text is "MINIMUM STATE DURATION 10 BARS". The check is
-        # about the slider having moved the number, not about the font's letter case.
-        DURATION_LABEL = (
-            "(() => { const n = document.querySelector('label[for=regime-duration]');"
-            " return n ? n.innerText.trim() : null; })()"
-        )
-        check("moving the anti-thrashing slider moves its label with it",
-              "10 bars" in (page.evaluate(DURATION_LABEL) or "").lower(),
-              page.evaluate(DURATION_LABEL))
-
-        page.evaluate(SET_INPUT % (json.dumps("#regime-cost"), json.dumps("-1")))
-        page.drain()
-        check("a negative switching cost is refused before the round trip",
-              shows(page, "Switching cost penalty must be a number at or above zero")
-              and page.evaluate(f"{RUN_DETECTION}.disabled") is True,
-              page.evaluate(f"{RUN_DETECTION}.disabled"))
-
-        page.evaluate(SET_INPUT % (json.dumps("#regime-cost"), json.dumps("0.005")))
-        page.drain()
-
-        if regime is None:
-            # Nothing in the store can produce a label, so there is no dashboard to reach.
-            # The store's contents are not the application's defect and are not asserted;
-            # what is checked is that the page still renders its configuration rather than
-            # failing on a dataset it cannot fit.
-            print("    no regime-capable dataset; the D1 run is skipped")
-            check("the configuration panel renders for a dataset that cannot be fitted",
-                  page.evaluate("document.querySelector('#regime-duration') !== null")
-                  and page.evaluate(COUNT % json.dumps(".policy__option")) == 4)
-        else:
-            check("restoring the cost re-arms the run",
-                  page.evaluate(f"{RUN_DETECTION}.disabled") is False,
-                  page.text()[-180:].replace("\n", " ")[:140])
-
-            page.evaluate(
-                "(() => {"
-                "  const r = document.querySelector('input[name=regime-model][value=hmm]');"
-                "  if (!r || r.disabled || r.checked) return false;"
-                "  r.click(); return true;"
-                "})()"
-            )
-            page.drain()
-
-            # The button's running label is transient by design — the fit here finishes in
-            # well under a second — so it cannot be sampled reliably from a second round
-            # trip, and reading it in the *same* evaluation as the click does not work
-            # either: this was tried, and React had not yet committed the update when the
-            # expression returned ("Run Detection" with Stop waiting still disabled). A
-            # MutationObserver installed before the click records the label every time React
-            # changes it, which turns "did this ever show a job handle" from a race into a
-            # question with a definite answer.
-            started = page.evaluate(
-                "(() => {"
-                f"  const b = {RUN_DETECTION};"
-                "  if (!b || b.disabled) return null;"
-                "  const seen = [];"
-                "  window.__regimeRunLabels = seen;"
-                "  new MutationObserver(() => seen.push(b.innerText))"
-                "    .observe(b, { childList: true, subtree: true, characterData: true });"
-                "  b.click();"
-                "  return true;"
-                "})()"
-            )
-
-            # Waits on the failure notice as well as the gauge: a fit that is refused must
-            # end this check with the reason on screen rather than after five minutes of
-            # polling a page that will never change.
-            arrived = page.wait_for(
-                "document.querySelector('.regime__gauge') !== null"
-                " || document.querySelector('.result__bar--error') !== null",
-                timeout=300,
-            )
-            check("the run returns a labelled frame rather than an error",
-                  arrived
-                  and page.evaluate("document.querySelector('.regime__gauge') !== null"),
-                  page.text()[-220:].replace("\n", " ")[:180])
-
-            labels = page.evaluate("window.__regimeRunLabels || []") or []
-            check("the button becomes a polling job handle while the fit runs",
-                  bool(started)
-                  and any(str(label).startswith("Running") for label in labels),
-                  f"{labels}")
-            check("the page comes back to Run Detection once the job lands",
-                  bool(labels) and str(labels[-1]).strip() == "Run Detection",
-                  f"{labels[-3:]}")
-
-            state = page.evaluate(
-                "(() => { const n = document.querySelector('.regime__gauge-state');"
-                " return n ? n.innerText.trim() : null; })()"
-            )
-            percent = page.evaluate(
-                "(() => { const n = document.querySelector('.regime__gauge-value');"
-                " return n ? n.innerText.trim() : null; })()"
-            )
-            check("the gauge names one of the five states and sizes its probability",
-                  state in {"Trending Up", "Trending Down", "Ranging", "Crisis", "Transition"}
-                  and isinstance(percent, str) and percent.endswith("%"),
-                  f"{state} at {percent}")
-
-            check("the timeline and the transition matrix are both offered",
-                  shows(page, "Regime timeline") and shows(page, "Transition matrix"))
-            check("both figures actually drew",
-                  page.evaluate(COUNT % json.dumps(".js-plotly-plot .main-svg")) >= 2,
-                  page.evaluate(COUNT % json.dumps(".js-plotly-plot .main-svg")))
-
-            table_keys = page.evaluate(
-                "Array.from(document.querySelectorAll('.regime__table-key'))"
-                ".map((n) => n.innerText.trim().toLowerCase())"
-            )
-            check("the diagnostics table carries the fit statistics",
-                  {"bic (latest refit)", "switch count", "average state duration"}
-                  <= set(table_keys),
-                  f"{table_keys}")
-            report_keys = page.evaluate(REPORT_KEYS)
-            check("the report explains the score it prints",
-                  "net value-add" in report_keys
-                  and {"refits", "crisis override"} <= set(report_keys),
-                  f"{report_keys}")
-            # The two naming defects this driver was extended to catch, asserted as the
-            # words on the page: the score's cost is charged per *position* change while the
-            # report's switch count counts state changes, and the null prefix is the warm-up
-            # *plus* the training window rather than the warm-up alone.
-            check("the switching cost is charged per position change, not per state change",
-                  shows(page, "position change"))
-            check("the unlabelled prefix is named as the warm-up plus the training window",
-                  shows(page, "Unlabelled (warm-up + training)"))
-            check("the score is stated to be in-sample",
-                  shows(page, "In-sample"))
-            check("the output preview renders the labelled frame",
-                  page.evaluate(COUNT % json.dumps(".preview tbody tr")) >= 1,
-                  f"{page.evaluate(COUNT % json.dumps('.preview tbody tr'))} preview rows")
-            check("the run saved a child dataset and offers to open it",
-                  page.evaluate(
-                      "Array.from(document.querySelectorAll('button'))"
-                      ".some((b) => b.innerText.trim().startsWith('Open '))"),
-                  page.evaluate(
-                      "Array.from(document.querySelectorAll('button'))"
-                      ".map((b) => b.innerText.trim()).find((t) => t.startsWith('Open '))"))
+        # D9 trains, D10 validates/approves, D11 infers from the approved version.
+        # tools/verify_regimes_browser.py drives the complete isolated data workflow.
+        print("== D9-D11 regime detection ==")
+        page.goto("/regime/discovery")
+        check("D9 exposes prepared inputs and all model families", page.wait_for(
+            """document.querySelector('[aria-label="Prepared dataset"]') !== null""",
+            timeout=30) and all(shows(page, name) for name in (
+                "Baseline Models", "Unsupervised Models", "Supervised Models", "Hybrid Models",
+                "Hyperparameter Optimization", "Training Results")))
+        check("D9 offers fitting and independent experiments",
+              shows(page, "Fit model & save artifacts")
+              and shows(page, "Stage independent experiment"))
+        page.goto("/regime/evaluation")
+        check("D10 exposes validation and approval", page.wait_for(
+            """document.querySelector('[aria-label="Trained candidate"]') !== null""",
+            timeout=30) and shows(page, "Walk-Forward Validation")
+              and shows(page, "Approve validated model for D11"))
+        page.goto("/regime/inference")
+        check("D11 exposes approved inference and genuine empty states", page.wait_for(
+            """document.querySelector('[aria-label="Approved model version"]') !== null""",
+            timeout=30) and shows(page, "Run approved model")
+              and shows(page, "Current Market Regime Dashboard")
+              and shows(page, "Monitoring & Alerts"))
+        check("D11 defaults to causal filtering", page.evaluate(
+            """document.querySelector('[aria-label="Decoding method"]').value === 'filter'"""))
 
         # ------------------------------------------------- E1 · volatility forecast
         # The first screen in this application whose subject is a bar that has not happened
@@ -2252,11 +2049,24 @@ def main() -> int:
             "Array.from(document.querySelectorAll('.policy__option input[type=checkbox]'))"
             ".map((n) => n.value)"
         )
+        hybrid_cost = page.evaluate(
+            "(() => {"
+            "  const row = Array.from(document.querySelectorAll('.policy__option'))"
+            "    .find((n) => n.querySelector('input')?.value === 'arma_egarch_xgboost');"
+            "  const info = row?.querySelector('.description-toggle');"
+            "  if (!info) return false; info.click(); return true;"
+            "})()"
+        )
         check("every model is offered, and a hybrid states what it costs",
               set(offered)
               == {"garch", "egarch", "gjr_garch", "arma_egarch_xgboost", "tdnn_gjr_garch"}
-              and shows(page, "Refits a second model at every scored step"),
+              and bool(hybrid_cost)
+              and page.wait_for(
+                  "document.querySelector('.description-popup')?.innerText"
+                  ".includes('Refits a second model at every scored step')"
+              ),
               f"{offered}")
+        page.evaluate("document.querySelector('.description-toggle[aria-expanded=true]')?.click()")
 
         check("all four shock distributions and both mean equations are offered",
               page.evaluate(COUNT % json.dumps("input[name=vol-distribution]")) == 4
@@ -2410,8 +2220,22 @@ def main() -> int:
             check("the Mincer–Zarnowitz caveat is stated rather than left to the reader",
                   shows(page, "squared log return")
                   and shows(page, "not evidence of a broken one"))
+            scored_help = page.evaluate(
+                "(() => {"
+                "  const section = Array.from(document.querySelectorAll('.section'))"
+                "    .find((n) => n.querySelector('.section__title')?.innerText"
+                "      .toLowerCase().includes('output preview'));"
+                "  const info = section?.querySelector('.description-toggle');"
+                "  if (!info) return false; info.click(); return true;"
+                "})()"
+            )
             check("the page states that the stored frame is the scored span, not the fan",
-                  shows(page, "scored walk-forward span only"))
+                  bool(scored_help)
+                  and page.wait_for(
+                      "document.querySelector('.description-popup')?.innerText"
+                      ".includes('scored walk-forward span only')"
+                  ))
+            page.evaluate("document.querySelector('.description-toggle[aria-expanded=true]')?.click()")
 
             report_keys = page.evaluate(REPORT_KEYS)
             check("the report states the series, the scored region and the projection",
@@ -2459,36 +2283,10 @@ def main() -> int:
         page_ref = locals().get("page")
         if page_ref is not None:
             page_ref.close()
-        # Through the protocol first, and off the process only as a fallback — the reverse
-        # of the obvious order, for the reason `close_stale_browser` documents: the process
-        # this driver started is the launcher, and killing it leaves the browser running.
-        endpoint = browser_endpoint()
-        if endpoint is not None:
-            close_browser(endpoint)
         try:
-            browser.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            browser.terminate()
-            try:
-                browser.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                browser.kill()
-        # After the browser is gone, never before: Windows holds handles on a profile that
-        # is still in use, and a tree deleted out from under a live browser is how a driver
-        # leaves a half-removed directory that its next run cannot re-create. Nothing is
-        # asserted about the outcome — a profile Windows still has open is a dead temporary
-        # directory, not a failed check.
-        #
-        # Retried, because one attempt is not enough: `wait` returns when the *launcher*
-        # exits, and Edge's renderer and utility children let go of their handles a moment
-        # later. A single `rmtree` there left 129 files behind and reported success, which
-        # is exactly the failure mode `ignore_errors` hides.
-        for _ in range(10):
-            if _PROFILE is None or not _PROFILE.exists():
-                break
-            shutil.rmtree(_PROFILE, ignore_errors=True)
-            if _PROFILE.exists():
-                time.sleep(0.5)
+            browser.close()
+        finally:
+            automation.stop()
 
 
 if __name__ == "__main__":

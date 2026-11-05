@@ -58,6 +58,11 @@ class DatasetNotFound(QuantmetricsError):
     code = "dataset_not_found"
 
 
+class ProjectNotFound(QuantmetricsError):
+    status_code = 404
+    code = "project_not_found"
+
+
 class JobNotFound(QuantmetricsError):
     """No job with that id.
 

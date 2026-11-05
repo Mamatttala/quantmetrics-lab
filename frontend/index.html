@@ -13,7 +13,9 @@
           var saved = window.localStorage.getItem("theme");
           document.documentElement.setAttribute(
             "data-theme",
-            saved === "light" ? "light" : "dark",
+            ["light", "dark", "finance-light", "nord", "simple-dark"].indexOf(saved) !== -1
+              ? saved
+              : "dark",
           );
         } catch (error) {
           document.documentElement.setAttribute("data-theme", "dark");

@@ -26,12 +26,9 @@ import type {
   OhlcvResponse,
   PageResponse,
   PreviewResponse,
+  Project,
   QualityResponse,
   JobRecord,
-  RegimeDetectRequest,
-  RegimeOptions,
-  RegimeRunAccepted,
-  RegimeRunResult,
   ScalingAccepted,
   ScalingOptions,
   ScalingRequest,
@@ -43,6 +40,8 @@ import type {
   VolForecastRequest,
   VolOptions,
 } from "./types";
+import { getActiveProjectId, getProjectRevision } from "./projectSelection";
+import type { CorrelationRequest, CorrelationResult, ExploratoryOptions, PCARequest, PCAResult } from "./exploratory";
 
 const BASE = "/api";
 
@@ -65,14 +64,23 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const options: RequestInit = { ...init };
+  const revision = getProjectRevision();
+  const headers = new Headers(init.headers);
+  headers.set("X-Project-Id", getActiveProjectId());
   if (!(options.body instanceof FormData)) {
     // Only set for JSON bodies: a FormData body must be left alone so the browser
-    // can generate the multipart boundary itself. Nothing in this client passes
-    // custom headers, so there is no merge to preserve.
-    options.headers = { "Content-Type": "application/json" };
+    // can generate the multipart boundary itself.
+    headers.set("Content-Type", "application/json");
   }
+  options.headers = headers;
+
+  const ensureCurrentProject = () => {
+    if (revision !== getProjectRevision()) {
+      throw new ApiError("The active project changed.", "project_changed", 0);
+    }
+  };
 
   let response: Response;
   try {
@@ -88,6 +96,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     );
   }
 
+  ensureCurrentProject();
   if (!response.ok) {
     let payload: ApiErrorPayload | null = null;
     try {
@@ -121,10 +130,33 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
   }
-  return (await response.json()) as T;
+  const result = (await response.json()) as T;
+  // A completed request from the previous project must not navigate the new one
+  // to its result or populate a newly selected project's controls.
+  ensureCurrentProject();
+  return result;
 }
 
 export const api = {
+  exploratoryOptions: (datasetId?: string) => request<ExploratoryOptions>(
+    `/exploratory/options${datasetId ? `?dataset_id=${encodeURIComponent(datasetId)}` : ""}`,
+  ),
+  runCorrelation: (body: CorrelationRequest) => request<ScalingAccepted | CorrelationResult>("/exploratory/correlation", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  runPCA: (body: PCARequest) => request<ScalingAccepted | PCAResult>("/exploratory/pca", {
+    method: "POST", body: JSON.stringify(body),
+  }),
+  listProjects: () => request<Project[]>("/projects"),
+
+  createProject: (name: string) =>
+    request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
+
+  datasetExportUrl: (id: string, format: string) =>
+    `${BASE}/datasets/${encodeURIComponent(id)}/export?${new URLSearchParams({
+      format, project_id: getActiveProjectId(),
+    })}`,
+
   health: () =>
     request<{ status: string; version: string; data_dir: string }>("/health"),
 
@@ -267,27 +299,9 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  // ------------------------------------------------------- D · regime detection
-
-  /** What this dataset can support, and why not for the rest.
-   *
-   *  `dataset_id`, not `datasetId` — the wire format is snake_case throughout. */
-  regimeOptions: (datasetId: string) =>
-    request<RegimeOptions>(
-      `/regime/options?dataset_id=${encodeURIComponent(datasetId)}`,
-    ),
-
-  /** Accept a detection run. Resolves with a job handle, not a result: the fit takes
-   *  longer than a request should, so the caller polls `job()` until it is terminal. */
-  detectRegime: (body: RegimeDetectRequest) =>
-    request<RegimeRunAccepted>("/regime/detect", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
-
   /** Poll a job. The result type is named by the caller because the registry is shared
    *  between D1's detections and C7's scaling runs; see `JobRecord`. */
-  job: <TResult = RegimeRunResult>(jobId: string) =>
+  job: <TResult = unknown>(jobId: string) =>
     request<JobRecord<TResult>>(`/jobs/${encodeURIComponent(jobId)}`),
 
   jobs: (limit = 25) => request<JobRecord[]>(`/jobs?limit=${limit}`),

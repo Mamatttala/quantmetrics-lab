@@ -64,11 +64,14 @@ export function Timeline({ rows, totalRows }: TimelineProps) {
 
   const grouped = lanes(rows);
   const multiFold = grouped.length > 1;
+  const visibleRoles = (["train", "val", "test"] as const).filter(
+    (role) => rows.some((row) => row.role === role),
+  );
 
   return (
     <div className="timeline">
       <div className="timeline__legend">
-        {(["train", "val", "test"] as const).map((role) => (
+        {visibleRoles.map((role) => (
           <span className="timeline__legend-item" key={role}>
             <span className={`timeline__swatch timeline__swatch--${role}`} />
             {ROLE_LABELS[role]}

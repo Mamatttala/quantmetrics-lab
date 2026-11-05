@@ -772,7 +772,7 @@ async def test_a_resampled_child_is_named_for_what_happened(
 
     child = result["dataset"]
     assert child is not None
-    assert child["name"] == "klines (resampled)"
+    assert "__resampled__" in child["name"]
     assert child["category"] == "processed_data"
     assert child["parent_dataset_id"] == base.dataset_id
     assert "merge_inputs" not in child["provenance"]

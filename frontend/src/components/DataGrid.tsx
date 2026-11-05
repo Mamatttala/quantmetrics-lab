@@ -39,7 +39,7 @@ import { ApiError, api } from "@/api/client";
 import type { PageResponse } from "@/api/types";
 
 import { ContextMenu, type MenuItem } from "./ContextMenu";
-import { useTheme } from "@/theme";
+import { isLightTheme, useTheme } from "@/theme";
 import {
   coerce,
   parse,
@@ -725,7 +725,7 @@ export function DataGrid({
         )}
       </div>
 
-      <div className={`ag-theme-quartz${theme === "dark" ? "-dark" : ""} grid__body`}>
+      <div className={`ag-theme-quartz${isLightTheme(theme) ? "" : "-dark"} grid__body`}>
         <AgGridReact<Row>
           ref={gridRef}
           // v33 defaults to the JS theming API; `legacy` opts back into the CSS

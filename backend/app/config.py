@@ -7,6 +7,7 @@ to start.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from functools import lru_cache
 from pathlib import Path
 
@@ -78,3 +79,12 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()
+
+
+# Each request and any task it starts retains its own project. Another request
+# must never redirect an in-flight fetch or model output to a different folder.
+project_settings: ContextVar[Settings | None] = ContextVar("project_settings", default=None)
+
+
+def get_project_settings() -> Settings:
+    return project_settings.get() or get_settings()

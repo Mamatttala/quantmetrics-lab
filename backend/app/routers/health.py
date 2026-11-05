@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.config import get_settings
+from app.config import get_project_settings
 
 router = APIRouter(tags=["health"])
 
@@ -22,7 +22,7 @@ class HealthResponse(BaseModel):
 
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    settings = get_settings()
+    settings = get_project_settings()
     return HealthResponse(
         status="ok",
         version="0.1.0",

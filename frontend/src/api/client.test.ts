@@ -1,9 +1,37 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, api } from "./client";
+import { setActiveProjectId } from "./projectSelection";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  setActiveProjectId("default");
+});
+
+describe("project-aware requests", () => {
+  it("sends the selected project on both JSON and multipart requests", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    setActiveProjectId("research");
+    await api.renameDataset("dataset", "new name");
+    expect(new Headers(fetchMock.mock.calls[0]?.[1].headers).get("X-Project-Id")).toBe("research");
+    fetchMock.mockResolvedValue(new Response("{}"));
+    await api.uploadCsv(new File(["value\n1"], "sample.csv"));
+    const uploadHeaders = new Headers(fetchMock.mock.calls[1]?.[1].headers);
+    expect(uploadHeaders.get("X-Project-Id")).toBe("research");
+    expect(uploadHeaders.has("Content-Type")).toBe(false);
+    expect(api.datasetExportUrl("dataset", "csv")).toContain("project_id=research");
+  });
+
+  it("rejects a late response from a previously selected project", async () => {
+    let complete!: (response: Response) => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => { complete = resolve; })));
+    setActiveProjectId("first");
+    const pending = api.listDatasets();
+    setActiveProjectId("second");
+    complete(new Response("[]"));
+    await expect(pending).rejects.toMatchObject({ code: "project_changed" });
+  });
 });
 
 describe("dataset mutation client methods", () => {

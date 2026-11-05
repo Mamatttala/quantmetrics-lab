@@ -107,6 +107,13 @@ ARCH_DISTRIBUTION_CLASS: dict[VolDistribution, type[Distribution]] = {
 #: number of times the clamp binds is reported so a run that is silently pinned is visible.
 CORRECTION_CLAMP = (0.1, 10.0)
 
+# EGARCH can converge to a numerically valid but unidentifiable boundary on a short
+# walk-forward window.  The service has the same bounds when it decides whether to score a
+# forecast; hybrids use this fit-local fallback first so a learned correction does not turn a
+# recoverable linear-leg boundary into a missing scored step.
+HYBRID_FORECAST_MAX_MULTIPLE = 100.0
+HYBRID_FORECAST_MIN_RATIO = 1e-30
+
 #: XGBoost hyperparameters. Deliberately shallow and heavily regularised: the training set
 #: is a few hundred rows of an extremely noisy target, and a deep forest on that data
 #: memorises the training slice and produces a correction that is pure noise at the
@@ -432,6 +439,9 @@ class HybridModel:
         self._next_features: np.ndarray | None = None
         self._clamped = 0
         self._untrained = False
+        self._training_max_square: float | None = None
+        self._training_mean_square: float | None = None
+        self._forecast_fallback_used = False
 
     @property
     def mean_label(self) -> str:
@@ -441,8 +451,11 @@ class HybridModel:
         self.linear.fit(returns, exog)
         self._clamped = 0
         self._untrained = False
+        self._forecast_fallback_used = False
 
         series = _as_float_1d(returns)
+        self._training_max_square = float(np.max(series**2))
+        self._training_mean_square = float(np.mean(series**2))
         # The design is built over the series **extended by one placeholder**. Row `m` of the
         # result is the feature vector for the bar immediately after the slice ends — the bar
         # the walk-forward is about to ask for — and its lags are the last `lags`
@@ -489,6 +502,19 @@ class HybridModel:
 
     def forecast_variance(self, horizon: int) -> np.ndarray:
         linear = self.linear.forecast_variance(horizon)
+        self._forecast_fallback_used = False
+        mean_square = self._training_mean_square
+        max_square = self._training_max_square
+        if mean_square is not None and max_square is not None and mean_square > 0.0:
+            lower = HYBRID_FORECAST_MIN_RATIO * mean_square
+            upper = HYBRID_FORECAST_MAX_MULTIPLE * max_square
+            invalid = (~np.isfinite(linear)) | (linear <= 0.0)
+            invalid |= linear < lower
+            invalid |= linear > upper
+            if bool(invalid.any()):
+                linear = linear.copy()
+                linear[invalid] = mean_square
+                self._forecast_fallback_used = True
         if horizon >= 1:
             # Step 1 only. See the module docstring: the correction has no definition
             # beyond the bar it was trained to predict, and iterating it would be inventing
@@ -509,6 +535,11 @@ class HybridModel:
         forecast to stand alone."""
         return self._untrained
 
+    @property
+    def forecast_fallback_used(self) -> bool:
+        """Whether the latest path used its fit-window mean for a collapsed linear leg."""
+        return self._forecast_fallback_used
+
 
 def build_model(
     name: VolModel,
@@ -528,30 +559,50 @@ def build_model(
     """
     if name is VolModel.GARCH:
         return ArchModel(
-            name, vol="GARCH", p=p, o=0, q=q,
-            distribution=distribution, mean_model=mean_model,
+            name,
+            vol="GARCH",
+            p=p,
+            o=0,
+            q=q,
+            distribution=distribution,
+            mean_model=mean_model,
         )
     if name is VolModel.EGARCH:
         # EGARCH needs at least one asymmetry order to be the model the name refers to;
         # with o=0 it is a symmetric EARCH, which is a different and much less useful
         # process. The request validator refuses o=0 for this model.
         return ArchModel(
-            name, vol="EGARCH", p=p, o=o, q=q,
-            distribution=distribution, mean_model=mean_model,
+            name,
+            vol="EGARCH",
+            p=p,
+            o=o,
+            q=q,
+            distribution=distribution,
+            mean_model=mean_model,
         )
     if name is VolModel.GJR_GARCH:
         # GJR is defined by exactly one asymmetry term: the recursion has a single
         # indicator for "the last return was negative". o=1 is not a tuning choice.
         return ArchModel(
-            name, vol="GARCH", p=p, o=1, q=q,
-            distribution=distribution, mean_model=mean_model,
+            name,
+            vol="GARCH",
+            p=p,
+            o=1,
+            q=q,
+            distribution=distribution,
+            mean_model=mean_model,
         )
     if name is VolModel.ARMA_EGARCH_XGBOOST:
         return HybridModel(
             name,
             linear=ArchModel(
-                name, vol="EGARCH", p=p, o=max(1, o), q=q,
-                distribution=distribution, mean_model=mean_model,
+                name,
+                vol="EGARCH",
+                p=p,
+                o=max(1, o),
+                q=q,
+                distribution=distribution,
+                mean_model=mean_model,
             ),
             learner=XGBoostCorrection(),
             lags=lags,
@@ -560,8 +611,13 @@ def build_model(
         return HybridModel(
             name,
             linear=ArchModel(
-                name, vol="GARCH", p=p, o=1, q=q,
-                distribution=distribution, mean_model=mean_model,
+                name,
+                vol="GARCH",
+                p=p,
+                o=1,
+                q=q,
+                distribution=distribution,
+                mean_model=mean_model,
             ),
             learner=TDNNCorrection(),
             lags=lags,

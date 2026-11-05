@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import type { ReactNode } from "react";
 
 interface PageHeaderProps {
@@ -11,8 +12,10 @@ interface PageHeaderProps {
 export function PageHeader({ title, lead, children }: PageHeaderProps) {
   return (
     <header>
-      <h1 className="page__title">{title}</h1>
-      <p className="page__lead">{lead}</p>
+      <h1 className="page__title">
+        {title}
+        <Description className="page__lead">{lead}</Description>
+      </h1>
       {children}
     </header>
   );

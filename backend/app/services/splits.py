@@ -15,8 +15,8 @@ genuinely separate. See ``_apply_boundary``.
 because indices are unambiguous, and it stores the source dataset's checksum so that
 applying it to a different frame is refused rather than silently mis-sliced.
 
-Nothing here writes a new price frame. A plan is a description, so it is stored as an
-``outputs`` table and the dataset it describes is not touched at all.
+The boundary plan is stored as an ``outputs`` table. Its train, validation and test
+observation frames are immutable ``processed_data`` children; the source is untouched.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import DatasetNotFound, ValidationFailure
 from app.models.dataset import DatasetMeta
@@ -191,36 +191,39 @@ def _percentage_spans(
 def _tscv_spans(
     n_rows: int, params: SplitParameters, *, rolling: bool
 ) -> tuple[list[Span], list[Boundary]]:
-    """Walk-forward folds, expanding or rolling.
+    """Walk forward through train/test, with an optional validation block.
 
-    ``n_folds + 1`` equal blocks; fold *k* tests block *k*, so the first block is only
-    ever training data and the last fold's test span reaches the end of the series (it
-    absorbs the remainder, so no tail row is left untested).
-
-    The rolling window is **one block**, which is the only length derivable from the
-    controls the specification offers — it gives `n_folds`, `gap_size` and `purge_flag`
-    and no window length at all. Defining it as the block immediately before the cut makes
-    every fold train on the same number of bars (``block − slack``), which is what makes it
-    rolling rather than merely shorter, and the report states both numbers so the choice is
-    visible rather than implied.
+    By default, divide into ``n_folds + 1`` blocks and test immediately after
+    training. Opting into validation adds one block between train and test,
+    dividing the series into ``n_folds + 2`` blocks. Training uses all preceding
+    blocks when expanding, or one block when rolling. The last test takes the
+    remainder. Gap/purge shorten each span before the following span starts.
     """
     folds = params.n_folds
-    block = n_rows // (folds + 1)
+    block = n_rows // params.walk_forward_blocks
     gap, horizon = params.gap_size, _horizon(params)
 
     spans: list[Span] = []
     boundaries: list[Boundary] = []
     for fold in range(1, folds + 1):
         cut = fold * block
+        test_cut = cut + block if params.include_validation else cut
         # The last fold takes the remainder, so the final block is at least as long as
         # the others and the series has no untested tail.
-        end = n_rows if fold == folds else (fold + 1) * block
+        end = n_rows if fold == folds else test_cut + block
         start = cut - block if rolling else 0
         train = Span(fold=fold, role=SplitRole.TRAIN, start=start, end=cut)
         train, boundary = _apply_boundary(train, cut, gap=gap, horizon=horizon)
         spans.append(train)
         boundaries.append(boundary)
-        spans.append(Span(fold=fold, role=SplitRole.TEST, start=cut, end=end))
+        if params.include_validation:
+            validation = Span(fold=fold, role=SplitRole.VAL, start=cut, end=test_cut)
+            validation, boundary = _apply_boundary(
+                validation, test_cut, gap=gap, horizon=horizon
+            )
+            spans.append(validation)
+            boundaries.append(boundary)
+        spans.append(Span(fold=fold, role=SplitRole.TEST, start=test_cut, end=end))
     return spans, boundaries
 
 
@@ -285,7 +288,7 @@ class SplitService:
     """Plans splits. Public methods are coroutines."""
 
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
         self.datasets = DatasetService(self.settings, self.catalog)
 
@@ -300,7 +303,7 @@ class SplitService:
             # One column, not the frame. A plan is arithmetic over the timeline; reading
             # every price column of a five-million-row file to compute it would be work
             # whose result is thrown away.
-            frame = parquet_store.read_dataset(path, columns=[time_column])
+            frame = parquet_store.read_dataset(path)
             times = _observation_times(frame[time_column], parent)
             _require_strictly_increasing(times, parent)
 
@@ -320,7 +323,7 @@ class SplitService:
                 data_dir=self.settings.data_dir,
                 catalog=self.catalog,
                 category=DatasetCategory.OUTPUTS,
-                name=request.name or f"{parent.name} (split)",
+                name=request.name,
                 operation=OPERATION,
                 detail={
                     "split_type": request.split_type.value,
@@ -345,9 +348,12 @@ class SplitService:
                 },
                 dataset_id=plan_id,
             )
+            partitions = materialise_partitions(parent, stored, rows, frame,
+                                                self.settings, self.catalog)
             return SplitPlanCreated(
                 dataset=stored,
                 plan=rows,
+                partitions=partitions,
                 report=_report(
                     request, time_column, n_rows, spans, boundaries, rows, parent
                 ),
@@ -389,6 +395,89 @@ class SplitService:
 
 
 # --------------------------------------------------------------------------- helpers
+
+
+def materialise_partitions(
+    parent: DatasetMeta, plan: DatasetMeta, rows: list[SplitPlanRow],
+    frame: pd.DataFrame, settings: Settings, catalog: Catalog,
+) -> list[DatasetMeta]:
+    """Persist actual observations per fold/role, with their source and plan lineage.
+
+    Idempotent so existing boundary-only plans can be upgraded without rerunning
+    their split geometry or duplicating partitions on subsequent upgrades.
+    """
+    existing = {
+        meta.provenance.get("split_partition_label"): meta
+        for meta in catalog.derived_datasets(plan.dataset_id, "split_partition")
+    }
+    result = []
+    for row in rows:
+        label = f"fold{row.fold}_{row.role.value}"
+        if label not in existing:
+            existing[label] = persist_dataset(
+                parent=parent,
+                frame=frame.iloc[row.start_index:row.end_index].reset_index(drop=True),
+                data_dir=settings.data_dir, catalog=catalog,
+                category=DatasetCategory.PROCESSED, name=None, operation="split_partition",
+                detail=row.model_dump(mode="json"),
+                extra_provenance={
+                    "split_plan_id": plan.dataset_id, "split_partition_label": label,
+                    "split_role": row.role.value, "split_fold": str(row.fold),
+                    "split_start_index": str(row.start_index),
+                    "split_end_index": str(row.end_index),
+                    "split_dataset_checksum": parent.checksum,
+                },
+                extra_parents=[(plan.dataset_id, {"role": "split_plan"})],
+            )
+        result.append(existing[label])
+    catalog.annotate_dataset(plan.dataset_id, {"partitions_materialised": "1"})
+    return result
+
+
+def migrate_legacy_partitions(settings: Settings, catalog: Catalog) -> int:
+    """Backfill the observation rows older C6 runs did not save. Safe to rerun."""
+    import logging
+
+    created = 0
+    service = DatasetService(settings, catalog)
+    for summary in catalog.list_datasets(DatasetCategory.OUTPUTS):
+        if summary.operation != OPERATION:
+            continue
+        plan = catalog.get_dataset(summary.dataset_id)
+        assert plan is not None
+        if plan.provenance.get("partitions_materialised") == "1":
+            continue
+        try:
+            if not plan.parent_dataset_id:
+                raise ValidationFailure("The split plan has no source dataset.")
+            parent = service._require(plan.parent_dataset_id)
+            if plan.provenance.get("split_dataset_checksum") != parent.checksum:
+                raise ValidationFailure("The split plan's source checksum does not match.")
+            source_path = resolved_path(parent, settings)
+            if parquet_store.verify_checksum(source_path) != parent.checksum:
+                raise ValidationFailure("The source file's checksum does not match its catalog.")
+            if parquet_store.verify_checksum(resolved_path(plan, settings)) != plan.checksum:
+                raise ValidationFailure(
+                    "The split plan file's checksum does not match its catalog."
+                )
+            plan_frame = parquet_store.read_dataset(resolved_path(plan, settings))
+            rows = [_from_record({str(k): v for k, v in record.items()})
+                    for record in plan_frame.to_dict(orient="records")]
+            if any(row.start_index < 0 or row.end_index > parent.row_count
+                   or row.end_index <= row.start_index
+                   or row.split_id != plan.dataset_id for row in rows):
+                raise ValidationFailure("The split plan contains invalid source ranges.")
+            before = len(catalog.derived_datasets(plan.dataset_id, "split_partition"))
+            partitions = materialise_partitions(
+                parent, plan, rows, parquet_store.read_dataset(source_path), settings, catalog,
+            )
+            created += len(partitions) - before
+        except (ValidationFailure, OSError, ValueError) as error:
+            # One unavailable legacy file must not hide every other dataset in a project.
+            logging.getLogger(__name__).warning(
+                "Cannot backfill split %s: %s", plan.dataset_id, error
+            )
+    return created
 
 
 def plans_for(catalog: Catalog, dataset_id: str) -> list[SplitPlanSummary]:
@@ -494,7 +583,8 @@ def _require_usable(
     would leave a plausible-looking artifact that fails much later.
 
     The fold-count check comes **first**, and deliberately. ``n_folds`` folds need
-    ``n_folds + 1`` blocks to be at least two bars each, so a series that is too short
+    ``n_folds + 1`` blocks (plus one if validation is enabled) of at least two bars each.
+    A series that is too short
     produces a *block* of one bar or none — and every symptom below it (an empty test span,
     a one-row training span) is a consequence of that one fact. Reporting the symptom would
     send the user to adjust the wrong control.
@@ -504,11 +594,15 @@ def _require_usable(
     labelled = f"{n_rows} rows of {time_column}"
     if request.split_type.is_tscv:
         folds = request.parameters.n_folds
-        if n_rows // (folds + 1) < 2:
+        blocks = request.parameters.walk_forward_blocks
+        roles = "training, validation and test" if request.parameters.include_validation else (
+            "training and test"
+        )
+        if n_rows // blocks < 2:
             raise ValidationFailure(
-                f"{folds} folds need at least {2 * (folds + 1)} rows ({labelled}); each "
-                f"block would be {n_rows // (folds + 1)} bar(s), and a fold has to train "
-                "on one block and test on another.",
+                f"{folds} folds need at least {2 * blocks} rows ({labelled}); each "
+                f"block would be {n_rows // blocks} bar(s), and a fold needs "
+                f"separate {roles} blocks.",
                 hint="Use fewer folds, or a longer dataset.",
             )
     for span in spans:
@@ -523,6 +617,13 @@ def _require_usable(
         raise ValidationFailure(
             f"This split leaves a training span of {smallest} row(s) ({labelled}), which "
             "is too short to fit anything on.",
+            hint="Reduce gap_size or label_horizon_bars, use fewer folds, or use a "
+            "longer dataset.",
+        )
+
+    if any(span.role is SplitRole.VAL and span.rows == 0 for span in spans):
+        raise ValidationFailure(
+            f"This split leaves the validation span empty ({labelled}).",
             hint="Reduce gap_size or label_horizon_bars, use fewer folds, or use a "
             "longer dataset.",
         )
@@ -683,16 +784,26 @@ def _warnings(
             "very little."
         )
     if request.split_type.is_tscv:
-        block = n_rows // (params.n_folds + 1)
+        block = n_rows // params.walk_forward_blocks
         scheme = (
             "everything before it (expanding)"
             if request.split_type is SplitType.TSCV_EXPANDING
             else "the single block before it (rolling)"
         )
+        if params.include_validation:
+            detail = (
+                f"Validation is enabled. Each fold validates on one block and tests "
+                f"the next, training on {scheme}. The first two blocks are never tested."
+            )
+        else:
+            detail = (
+                f"Validation is disabled. Each fold tests one block, training on "
+                f"{scheme}. The first block is never tested."
+            )
         notes.append(
-            f"Blocks are {block} bars: the series is divided into {params.n_folds + 1} "
-            f"equal parts and fold k tests part k, training on {scheme}. The first block "
-            "is never tested."
+            f"Blocks are {block} bars: the series is divided into "
+            f"{params.walk_forward_blocks} parts. {detail} "
+            "The final test includes any remainder."
         )
     if any(boundary.gap for boundary in boundaries):
         first = boundaries[0]

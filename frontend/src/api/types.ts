@@ -12,6 +12,9 @@ export type DatasetCategory =
   | "raw_data"
   | "uploaded_data"
   | "processed_data"
+  | "trained_data"
+  | "forecast_data"
+  | "model_data"
   | "outputs";
 
 export type Provider = "binance" | "yahoo" | "upload" | "derived";
@@ -39,6 +42,9 @@ export const CATEGORY_LABELS: Record<DatasetCategory, string> = {
   raw_data: "Raw Data",
   uploaded_data: "Uploaded Data",
   processed_data: "Processed Data",
+  trained_data: "Trained Data",
+  forecast_data: "Forecast Data",
+  model_data: "Model Data",
   outputs: "Outputs",
 };
 
@@ -46,13 +52,45 @@ export const CATEGORY_ORDER: readonly DatasetCategory[] = [
   "raw_data",
   "uploaded_data",
   "processed_data",
+  "trained_data",
+  "forecast_data",
+  "model_data",
   "outputs",
 ];
+
+export const OPERATION_LABELS: Record<string, string> = {
+  fetch: "Fetched",
+  upload: "Uploaded",
+  edit: "Edited",
+  clean: "Cleaning",
+  resample: "Resampling",
+  merge: "Merging",
+  features: "Feature Engineering",
+  split_partition: "Chronological Splits",
+  split: "Split Plans",
+  scaling: "Scaling",
+  scaler_params: "Scaler Parameters",
+  pca_dimensionality_reduction: "PCA Results",
+  pca_parameters: "PCA Parameters",
+  regime: "Regime Detection",
+  volatility: "Volatility Forecasting",
+  return_prediction: "Return Prediction",
+  model: "Models",
+  report: "Reports",
+  table: "Tables",
+  visual: "Visuals",
+};
 
 export interface ColumnMeta {
   name: string;
   dtype: string;
   nullable: boolean;
+}
+
+export interface Project {
+  project_id: string;
+  name: string;
+  created_at: string;
 }
 
 export interface DatasetSummary {
@@ -74,6 +112,10 @@ export interface DatasetSummary {
    *  hide their own artifacts from their dataset pickers: a split plan is a table of row
    *  indices, and offering it as something to split would produce a plan over a plan. */
   operation: string | null;
+  /** What the rows represent. Only observations are suitable as ordinary page inputs. */
+  artifact_kind: string;
+  /** Menu page that created the entry, such as C6 or E1. */
+  origin_page: string | null;
 }
 
 export interface DatasetMeta extends DatasetSummary {
@@ -757,128 +799,9 @@ export interface FeatureResult {
   preview: HeadTailPreview;
 }
 
-/* ============================================================ D · Regime detection
-
-   Module D's contract. Two shapes here are worth reading before the rest:
-
-   `RegimeOptions` is the *verdict* the config panel renders — which models and which
-   observations this dataset can support, each with a reason when it cannot. It is computed
-   server-side in one function and never re-derived here, so a control greyed out in the
-   browser and a refusal from the run endpoint cannot disagree about why.
-
-   `RegimeReport` is the diagnostics table. Every field is `| null` where the engine can
-   legitimately have nothing to report — a run with no labelled rows has no BIC, and a JSON
-   `null` is the honest encoding of that. `undefined` would be indistinguishable from a
-   field this frontend had not been updated to read. */
-
-export type RegimeModel = "hmm" | "gmm" | "hybrid" | "rules";
-
-export type RegimeFeatureId =
-  | "log_return"
-  | "realized_volatility"
-  | "volume_change"
-  | "adx"
-  | "rsi";
-
-export type RegimeStateName =
-  | "trending_up"
-  | "trending_down"
-  | "ranging"
-  | "crisis"
-  | "transition";
-
 export type JobStatus = "running" | "succeeded" | "failed";
 
-export interface RegimeFeatureOption {
-  id: RegimeFeatureId;
-  label: string;
-  /** `computed` from the prices here, or `carried` in from C5. */
-  kind: "computed" | "carried";
-  /** The dataset columns this observation is built from. */
-  needs: string[];
-  available: boolean;
-  /** Why not, when `available` is false. Never null when it is false. */
-  reason: string | null;
-}
-
-export interface RegimeModelOption {
-  id: RegimeModel;
-  available: boolean;
-  requires: string[];
-  reason: string | null;
-}
-
-export interface RegimeWarning {
-  /** `error` blocks the run; `warning` is a caution the user may overrule. */
-  level: "error" | "warning";
-  code: string;
-  message: string;
-}
-
-export interface RegimeAnnualisation {
-  available: boolean;
-  /** Bars per year for this dataset's timeframe and asset class, or null when unknown. */
-  periods_per_year: number | null;
-  timeframe: Timeframe | null;
-  reason: string;
-}
-
-export interface RegimeDefaults {
-  n_states: number;
-  min_state_duration: number;
-  switching_cost_penalty: number;
-  crisis_threshold: number;
-  min_train_bars: number;
-  refit_every: number;
-  volatility_window: number;
-}
-
-export interface RegimeOptions {
-  dataset_id: string;
-  name: string;
-  rows: number;
-  timeframe: Timeframe | null;
-  asset_class: AssetClass;
-  columns: string[];
-  features: RegimeFeatureOption[];
-  available_features: RegimeFeatureId[];
-  annualisation: RegimeAnnualisation;
-  models: RegimeModelOption[];
-  defaults: RegimeDefaults;
-  warnings: RegimeWarning[];
-}
-
-export interface RegimeDetectRequest {
-  dataset_id: string;
-  model_type: RegimeModel;
-  n_states: number;
-  features: RegimeFeatureId[];
-  min_state_duration: number;
-  switching_cost_penalty: number;
-  crisis_threshold: number;
-  min_train_bars: number;
-  refit_every: number;
-  volatility_window: number;
-  name: string | null;
-  write: boolean;
-}
-
-export interface RegimeRunAccepted {
-  job_id: string;
-  status: JobStatus;
-  /** Where to poll. Sent by the server so the path is not spelled out in two places. */
-  poll: string;
-}
-
-/** A job record from the generic job registry.
- *
- *  `result` is parameterised because the registry is shared: Module D's jobs carry a
- *  `RegimeRunResult` and C7's carry a `ScalingCreated`, and the envelope around them is
- *  identical. A single non-generic type would have to say `RegimeRunResult | ScalingCreated`
- *  and every reader would then have to narrow a union that the job's own `kind` already
- *  decided — so the caller names what it is polling for instead. The default keeps D1's
- *  existing call sites unchanged. */
-export interface JobRecord<TResult = RegimeRunResult> {
+export interface JobRecord<TResult = unknown> {
   job_id: string;
   kind: string;
   status: JobStatus;
@@ -893,108 +816,11 @@ export interface JobRecord<TResult = RegimeRunResult> {
   result: TResult | null;
 }
 
-export interface RegimeStateDuration {
-  /** How many times this state was committed to. */
-  runs: number;
-  /** Mean length of those runs, in bars. */
-  mean_bars: number;
-  /** The longest single run, in bars. */
-  longest_bars: number;
-}
-
-export interface RegimeNetValueAdd {
-  definition: string;
-  /** Always true today. Present so a future out-of-sample figure can be told apart. */
-  in_sample: boolean;
-  bars_scored: number;
-  /**
-   * Bars the strategy actually held a position on. Zero means the rule never went long, so
-   * `return_improvement` is exactly `-benchmark_log_return` and the figure says nothing
-   * about the model — which the panel has to say out loud rather than present as a score.
-   */
-  bars_long: number;
-  strategy_log_return: number | null;
-  benchmark_log_return: number | null;
-  return_improvement: number | null;
-  /**
-   * Position entries and exits — *not* the report's `switch_count`, which counts committed
-   * state changes. Moving from ranging to crisis is a state change that costs nothing.
-   */
-  position_changes: number;
-  switching_cost_penalty: number;
-  switching_cost: number | null;
-  net_value_add: number | null;
-}
-
-export interface RegimeStationarity {
-  feature: string;
-  /** Null when the series was too short or constant for the test to say anything. */
-  stationary: boolean | null;
-  /** ADF p-value, absent when the test did not run. */
-  p_value?: number;
-  adf_statistic?: number;
-  detail: string;
-}
-
-export interface RegimeRefitDiagnostics {
-  /** Index of the first bar in the training window that produced this fit. */
-  train_from_bar?: number;
-  /** Index of the bar the training window stopped at — the fit never saw it or later. */
-  trained_through_bar?: number;
-  labels_from_bar?: number;
-  labels_to_bar?: number;
-  training_bars: number;
-  bic: number | null;
-  aic: number | null;
-  n_parameters: number;
-  n_iter: number | null;
-  converged: boolean | null;
-  [key: string]: unknown;
-}
-
-export interface RegimeReport {
-  method: string;
-  model_type: RegimeModel;
-  n_states_requested: number;
-  features: RegimeFeatureId[];
-  periods_per_year: number;
-  volatility_window: number;
-  crisis_threshold: number;
-  min_state_duration: number;
-  transition_confidence: number;
-  commit_confidence: number;
-  min_train_bars: number;
-  refit_every: number;
-  /** Bars consumed by the observation window before a feature vector exists at all. */
-  warmup_bars: number;
-  /**
-   * The whole null prefix: `warmup_bars` plus the bars the first model trained on and so
-   * never labelled. Equal to `state_counts.warmup`, and different from `warmup_bars`.
-   */
-  unlabelled_bars: number;
-  rows: number;
-  labelled_rows: number;
-  /** One diagnostic block per refit, in order. */
-  refit_points: RegimeRefitDiagnostics[];
-  refit_count: number;
-  switch_count: number;
-  crisis_override_bars: number;
-  crisis_bars_in_warmup: number;
-  stationarity: RegimeStationarity[];
-  net_value_add: RegimeNetValueAdd;
-  /** Every row is accounted for; the unlabelled prefix is keyed `warmup`. */
-  state_counts: Record<string, number>;
-  state_durations: Record<string, RegimeStateDuration>;
-  /** Row/column order, so the heatmap's axes cannot be mislabelled. */
-  transition_matrix: { labels: RegimeStateName[]; values: number[][] };
-  bic_latest_refit: number | null;
-  aic_latest_refit: number | null;
-}
-
-export interface RegimeRunResult {
-  dataset: DatasetMeta | null;
-  report: RegimeReport;
-  preview: HeadTailPreview;
+export interface AnalysisWarning {
+  /** `error` blocks the run; `warning` is a caution the user may overrule. */
+  level: "error" | "warning";
+  code: string;
+  message: string;
 }
 
 /* ============================================================ C6 · splits
@@ -1049,13 +875,13 @@ export const SPLIT_TYPE_OPTIONS: readonly PolicyOption<SplitType>[] = [
     value: "tscv_expanding",
     label: "Walk-forward — expanding window",
     detail:
-      "The series is cut into (folds + 1) equal blocks. Fold k tests block k and trains on everything before it, so early folds train on little and late folds on much. The first block is only ever training data.",
+      "Each fold trains on the preceding history and tests the next block. Training grows with each fold. Enable Include validation to add a separate validation block before each test block.",
   },
   {
     value: "tscv_rolling",
     label: "Walk-forward — rolling window",
     detail:
-      "As above, but each fold trains on the single block immediately before its test block rather than on all history. Suits a non-stationary series where old bars describe a regime that no longer holds — and leaves every fold with the same amount of training data.",
+      "Each fold trains on one block and tests the next. The training window moves forward and stays the same size. Enable Include validation to add a separate validation block between training and test.",
     caution:
       "Rolling discards history deliberately. On a short series that can leave a fold with very few training bars, which the report states rather than hides.",
   },
@@ -1069,6 +895,7 @@ export interface SplitParameters {
   test_start: string | null;
   test_end: string | null;
   n_folds: number;
+  include_validation: boolean;
   gap_size: number;
   purge_flag: boolean;
   label_horizon_bars: number | null;
@@ -1126,6 +953,8 @@ export interface SplitReport {
 export interface SplitPlanCreated {
   dataset: DatasetMeta;
   plan: SplitPlanRow[];
+  /** Actual train/validation/test observation frames saved under Processed Data. */
+  partitions: DatasetMeta[];
   report: SplitReport;
 }
 
@@ -1141,12 +970,9 @@ export interface SplitPlanSummary {
 
 /* ============================================================ C7 · scaling
 
-   The rule the whole module exists to hold: a scaler is fitted on the training span and
-   applied to everything. `split_plan_id` is therefore *required* for the three fitted
-   scalers — the backend refuses a request without one at the schema, so a page that let
-   the user press Run would render a 422 rather than a number. Which is why the option
-   list below is rendered from `ScalingOptions.scalers[].available` and never re-derived
-   here. */
+   Fitted scalers use all selected rows when split_plan_id is null, or a saved plan's
+   training rows when supplied. Rolling uses a trailing window. Availability is provided
+   by the server and depends on usable feature columns, rather than plan existence. */
 
 export type ScalerType = "minmax" | "standard" | "robust" | "rolling_zscore";
 
@@ -1155,23 +981,23 @@ export const SCALER_OPTIONS: readonly PolicyOption<ScalerType>[] = [
     value: "standard",
     label: "Standard (z-score)",
     detail:
-      "(x − mean) / standard deviation, with both estimated on the training span and applied to every row. The classic choice when a model assumes roughly centred inputs.",
+      "(x − mean) / standard deviation, estimated on the selected fit scope. The classic choice when a model assumes roughly centred inputs.",
     caution:
-      "The mean and deviation come from the training rows only. On the test span the result is not centred at zero — that is the point.",
+      "With a split plan, the mean and deviation come from training rows only; validation and test rows may have a different centre.",
   },
   {
     value: "minmax",
     label: "Min-Max to [0, 1]",
     detail:
-      "(x − min) / (max − min), with the bounds taken from the training span.",
+      "(x − min) / (max − min), with the bounds taken from the selected fit scope.",
     caution:
-      "Values outside the training range come out below 0 or above 1. That is correct behaviour, not an error — but it does mean the test span is not confined to the unit interval.",
+      "With a split plan, values outside the training range can come out below 0 or above 1.",
   },
   {
     value: "robust",
     label: "Robust (median / IQR)",
     detail:
-      "(x − median) / (Q3 − Q1) over the training span. Ignores the tails, so a handful of outliers moves the scale far less than it moves a mean and a standard deviation.",
+      "(x − median) / (Q3 − Q1) over the selected fit scope. A handful of outliers moves the scale far less than it moves a mean and a standard deviation.",
   },
   {
     value: "rolling_zscore",
@@ -1184,6 +1010,7 @@ export const SCALER_OPTIONS: readonly PolicyOption<ScalerType>[] = [
 export interface ScalerOption {
   id: ScalerType;
   needs_split_plan: boolean;
+  supports_split_plan: boolean;
   available: boolean;
   /** Never null when `available` is false. */
   reason: string | null;
@@ -1193,6 +1020,7 @@ export interface ScalingDefaults {
   features: string[];
   window: number;
   scaler_type: ScalerType;
+  split_plan_id: string | null;
 }
 
 export interface ScalingOptions {
@@ -1203,7 +1031,7 @@ export interface ScalingOptions {
   defaults: ScalingDefaults;
   scalers: ScalerOption[];
   plans: SplitPlanSummary[];
-  warnings: RegimeWarning[];
+  warnings: AnalysisWarning[];
 }
 
 export interface ScalingRequest {
@@ -1243,6 +1071,8 @@ export interface ScalingReport {
   /** Which rows the parameters were estimated from — the sentence that says whether the
    *  run was legitimate. */
   fit_role: string | null;
+  fit_dataset_id: string;
+  fit_dataset_name: string;
   fit_rows: number;
   fit_start_time: string | null;
   fit_end_time: string | null;

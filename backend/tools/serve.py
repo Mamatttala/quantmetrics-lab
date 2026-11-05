@@ -16,7 +16,10 @@ line — matching on the port instead would also kill unrelated listeners.
 
 from __future__ import annotations
 
+import contextlib
+import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -32,7 +35,12 @@ WEB_PORT = 5173
 
 def _venv_python() -> Path | None:
     """The project virtualenv's interpreter, or ``None`` if it has not been created."""
-    for relative in ("Scripts/python.exe", "bin/python"):
+    candidates = (
+        ("Scripts/python.exe", "bin/python")
+        if sys.platform == "win32"
+        else ("bin/python",)
+    )
+    for relative in candidates:
         candidate = ROOT / ".venv" / relative
         if candidate.exists():
             return candidate
@@ -57,6 +65,8 @@ def _can_import(python: Path, module: str) -> bool:
 
 
 def powershell(query: str) -> str:
+    if shutil.which("powershell") is None:
+        return ""
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", query],
         capture_output=True,
@@ -67,6 +77,12 @@ def powershell(query: str) -> str:
 
 
 def pids_matching(pattern: str) -> list[str]:
+    if sys.platform != "win32":
+        needle = "uvicorn" if "uvicorn" in pattern else "vite"
+        result = subprocess.run(
+            ["pgrep", "-f", needle], capture_output=True, text=True, check=False
+        )
+        return [line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()]
     query = (
         "Get-CimInstance Win32_Process | "
         f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
@@ -77,7 +93,13 @@ def pids_matching(pattern: str) -> list[str]:
 
 def kill(pattern: str, label: str) -> None:
     for pid in pids_matching(pattern):
-        subprocess.run(["taskkill", "/PID", pid, "/F", "/T"], capture_output=True, check=False)
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", pid, "/F", "/T"], capture_output=True, check=False
+            )
+        else:
+            with contextlib.suppress(OSError):
+                subprocess.run(["kill", "-TERM", pid], capture_output=True, check=False)
         print(f"stopped {label} pid {pid}")
 
 
@@ -120,7 +142,7 @@ def start_frontend() -> None:
         cwd=FRONTEND,
         stdout=handle,
         stderr=subprocess.STDOUT,
-        shell=True,
+        shell=sys.platform == "win32",
         creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
     )
     print(f"web  -> http://127.0.0.1:{WEB_PORT}   log: {log}")
@@ -149,9 +171,15 @@ if __name__ == "__main__":
     if "--stop" in sys.argv:
         for pattern, label in (("uvicorn*app.main", "api"), ("vite", "web")):
             for pid in pids_matching(pattern):
-                subprocess.run(
-                    ["taskkill", "/PID", pid, "/F", "/T"], capture_output=True, check=False
-                )
+                if sys.platform == "win32":
+                    subprocess.run(
+                        ["taskkill", "/PID", pid, "/F", "/T"],
+                        capture_output=True,
+                        check=False,
+                    )
+                else:
+                    with contextlib.suppress(OSError, ValueError):
+                        os.kill(int(pid), signal.SIGTERM)
                 print(f"stopped {label} pid {pid}")
         print("stopped")
         sys.exit(0)

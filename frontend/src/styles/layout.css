@@ -6,26 +6,57 @@
 
 .shell {
   display: grid;
-  grid-template-columns: auto auto 1fr;
+  grid-template-columns: auto auto minmax(0, 1fr);
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
 }
 
+.shell > .sidebar { grid-area: 1 / 1; }
+.shell > .explorer,
+.shell > .explorer-handle { grid-area: 1 / 2; }
+.shell > .main { grid-area: 1 / 3; }
+
 .shell__pane {
-  height: 100vh;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }
 
+.shell__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 26px 0;
+  background: var(--bg-main);
+}
+
+.shell__project-name {
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell__toolbar .theme-toggle { flex-shrink: 0; }
+
 /* ------------------------------------------------------------------- sidebar */
 
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: var(--pane-sidebar);
   background: var(--panel);
   border-right: 1px solid var(--border);
-  transition: width 0.3s ease;
+  min-width: 0;
+  min-height: 0;
 }
 
 .sidebar--collapsed {
@@ -57,7 +88,7 @@
   display: none;
 }
 
-/* Collapsed rail: the two header controls stack so both stay inside 52px. */
+/* Keep the collapse control centered inside the narrow rail. */
 .sidebar--collapsed .sidebar__header {
   flex-direction: column;
   padding: 10px 6px;
@@ -72,6 +103,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .sidebar__collapse {
@@ -98,6 +130,8 @@
   padding: 8px 0 24px;
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 
 /* Group separators stay visible in both states; headings appear only expanded. */
@@ -208,7 +242,7 @@
   width: var(--pane-explorer);
   min-width: 200px;
   max-width: 500px;
-  height: 100vh;
+  min-height: 0;
   background: var(--explorer-bg);
   border-left: 1px solid var(--explorer-border);
   border-right: 1px solid var(--explorer-border);
@@ -277,8 +311,8 @@
 }
 
 .explorer__btn--danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
 .explorer__btn:disabled {
@@ -288,8 +322,66 @@
 
 /* Tree --------------------------------------------------------------------- */
 
+.project-picker {
+  display: grid;
+  gap: 8px;
+  padding: 14px 12px;
+  border-bottom: 1px solid var(--explorer-border);
+  background: var(--explorer-head);
+}
+
+.project-picker__label {
+  color: var(--explorer-title);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.project-picker__select,
+.project-picker__form input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 10px;
+  border: 1px solid var(--explorer-btn-border);
+  border-radius: 6px;
+  background-color: var(--explorer-bg);
+  color: var(--explorer-text-strong);
+  font: inherit;
+  font-size: 12px;
+}
+
+.project-picker__select { padding-right: 28px; }
+.project-picker > .explorer__btn { justify-self: start; }
+.project-picker__form { display: grid; gap: 8px; }
+.project-picker__buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+.project-picker__error { color: var(--color-danger); font-size: 12px; margin: 0; }
+.project-picker__error .explorer__btn { display: block; margin-top: 8px; }
+
+.explorer__project-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 6px 6px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  color: var(--explorer-text-strong);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.explorer__project-name:hover { background: var(--explorer-hover); }
+.explorer__project-name svg { flex-shrink: 0; }
+.explorer__project-name span:first-of-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.explorer__project-name .explorer__count { margin-left: auto; }
+
 .explorer__body {
   flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   padding: 8px 0 20px;
@@ -389,12 +481,34 @@
   overflow: hidden;
 }
 
+.explorer__operation + .explorer__operation {
+  margin-top: 3px;
+}
+
+.explorer__operation-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 12px 1px 28px;
+  color: var(--explorer-chevron);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.045em;
+}
+
+.explorer__operation-label .explorer__count {
+  margin-left: auto;
+}
+
 /* Leaf node: one 16px level in. The row is a div rather than a button so its
  * navigation target and its action buttons are valid, independently clickable
  * interactive elements. */
 .explorer__row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   width: calc(100% - 12px);
   margin: 1px 6px;
   border-radius: 4px;
@@ -414,7 +528,7 @@
   display: block;
   width: 100%;
   min-width: 0;
-  padding: 6px 12px 4px 28px;
+  padding: 6px 12px 4px 42px;
   background: transparent;
   border: 0;
   border-radius: 4px;
@@ -443,32 +557,11 @@
 .explorer__actions {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 6px;
   min-width: 0;
-  padding: 1px 8px 5px 28px;
+  padding: 2px 8px 2px 0;
   font-family: var(--font-mono);
   font-size: 11px;
-}
-
-.explorer__quick {
-  padding: 0;
-  background: transparent;
-  border: 0;
-  color: var(--control);
-  cursor: pointer;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-decoration: underline dotted;
-}
-
-.explorer__quick:hover {
-  color: var(--accent-strong);
-}
-
-.explorer__action-spacer {
-  flex: 1 1 auto;
-  min-width: 4px;
 }
 
 .icon-btn {
@@ -493,11 +586,11 @@
 }
 
 .icon-btn.danger {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .icon-btn.danger:hover {
-  border-color: var(--danger);
+  border-color: var(--color-danger);
 }
 
 .explorer__empty {
@@ -508,7 +601,7 @@
 
 /* Drag handle on the right edge. The hit area is wider than the visible line so
  * it is grabbable without a pixel hunt. */
-.explorer__resize {
+.pane-resize {
   position: absolute;
   top: 0;
   right: -3px;
@@ -516,9 +609,10 @@
   height: 100%;
   cursor: col-resize;
   z-index: 5;
+  touch-action: none;
 }
 
-.explorer__resize::after {
+.pane-resize::after {
   content: "";
   position: absolute;
   top: 0;
@@ -529,8 +623,15 @@
   transition: background var(--transition);
 }
 
-.explorer__resize:hover::after {
-  background: var(--explorer-sel-bg);
+.pane-resize:hover::after,
+.pane-resize:focus-visible::after {
+  background: var(--accent);
+}
+
+.pane-resizing,
+.pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* Handle that restores a hidden explorer. Occupies the gutter between the
@@ -540,7 +641,7 @@
   align-items: center;
   justify-content: center;
   width: 18px;
-  height: 100vh;
+  min-height: 0;
   background: var(--explorer-bg);
   border-right: 1px solid var(--explorer-border);
   color: var(--explorer-chevron);
@@ -555,7 +656,7 @@
 
 /* ------------------------------------------------------------ theme toggle
  *
- * 32x32 rounded square in the explorer header. Dark shows a sun, light a moon. */
+ * Circular sun button in the shared top-right toolbar. */
 .theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -564,7 +665,7 @@
   height: 32px;
   padding: 0;
   border: 1px solid var(--toggle-border);
-  border-radius: 8px;
+  border-radius: 50%;
   background: var(--toggle-bg);
   color: var(--toggle-icon);
   font-size: 15px;
@@ -577,10 +678,79 @@
   transform: scale(1.1);
 }
 
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.theme-picker {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+}
+
+.theme-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(280px, calc(100vw - 24px));
+  padding: 8px;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius);
+  box-shadow: var(--popover-shadow);
+  z-index: 100;
+}
+
+.theme-menu__title {
+  padding: 4px 8px 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.theme-menu__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.theme-menu__option:hover { background: var(--bg-hover); }
+.theme-menu__option[aria-checked="true"] {
+  border-color: var(--color-accent);
+  background: var(--bg-selected);
+}
+.theme-menu__option:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+.theme-menu__selected { margin-left: auto; color: var(--color-accent); }
+.theme-preview { display: flex; flex: 0 0 auto; gap: 2px; }
+.theme-preview i {
+  width: 12px;
+  height: 20px;
+  border: 1px solid var(--border-input);
+  border-radius: 2px;
+}
+.theme-preview__background { background: var(--bg-main); }
+.theme-preview__surface { background: var(--bg-card); }
+.theme-preview__accent { background: var(--accent-gold); }
+.theme-preview__text { background: var(--text-primary); }
+
 /* ------------------------------------------------------------------- main */
 
 .main {
   background: transparent;
+  container-type: inline-size;
 }
 
 /* --------------------------------------------------------------- responsive
@@ -600,7 +770,7 @@
    * otherwise keep the sidebar track wider even after the sidebar itself is set to
    * 52px. Fix the first track at the same breakpoint as the rail. */
   .shell {
-    grid-template-columns: var(--pane-sidebar-collapsed) auto 1fr;
+    grid-template-columns: var(--pane-sidebar-collapsed) auto minmax(0, 1fr);
   }
 
   .sidebar {
@@ -610,9 +780,7 @@
     flex: 0 0 var(--pane-sidebar-collapsed);
   }
 
-  /* The CSS media query collapses the rail even when React's persisted state is
-   * still expanded. Stack both header controls here as well, otherwise their
-   * combined 62px intrinsic width cannot fit inside the 52px rail. */
+  /* Center the collapse control when the media query folds the sidebar. */
   .sidebar .sidebar__header {
     flex-direction: column;
     gap: 4px;
@@ -631,6 +799,7 @@
 
   .sidebar .sidebar__brand,
   .sidebar .sidebar__heading,
+  .sidebar__resize,
   .sidebar .navitem__label {
     display: none;
   }
@@ -639,4 +808,28 @@
     justify-content: center;
     padding: 10px 6px;
   }
+}
+
+/* Keep both the catalog and the page usable on phones. Hiding the explorer
+ * gives its entire row back to the page; the restore control stays reachable. */
+@media (max-width: 640px) {
+  .shell:not(.shell--explorer-hidden) {
+    grid-template-columns: var(--pane-sidebar-collapsed) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 40%) minmax(0, 1fr);
+  }
+
+  .shell:not(.shell--explorer-hidden) > .sidebar { grid-area: 1 / 1 / 3 / 2; }
+  .shell:not(.shell--explorer-hidden) > .main { grid-area: 2 / 2; }
+  .shell > .explorer {
+    width: 100% !important;
+    min-width: 0;
+    max-width: none;
+    border-bottom: 1px solid var(--explorer-border);
+  }
+  .explorer__resize { display: none; }
+  .shell__toolbar { padding: 10px 12px 0; }
+}
+
+@container (max-width: 480px) {
+  .page { padding: 16px 12px 32px; }
 }

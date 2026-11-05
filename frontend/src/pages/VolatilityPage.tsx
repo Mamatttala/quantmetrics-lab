@@ -1,3 +1,6 @@
+import { Description } from "@/components/Description";
+import { DatasetOptions } from "@/components/DatasetOptions";
+import { C8CausalNotice } from "@/components/C8CausalNotice";
 /**
  * Module E — Volatility Forecasting.
  *
@@ -30,8 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
-import createPlotlyComponent from "react-plotly.js/factory";
-import Plotly from "plotly.js-dist-min";
+import { ResponsivePlot as Plot } from "@/charts/ResponsivePlot";
 import type { Data, Layout } from "plotly.js";
 
 import { ApiError, api } from "@/api/client";
@@ -50,29 +52,26 @@ import type {
 } from "@/api/types";
 import { HeadTailTable } from "@/components/HeadTailTable";
 import { PageHeader } from "@/components/PageHeader";
-import { chartTheme, useTheme } from "@/theme";
+import { chartTheme, themeColor, useTheme } from "@/theme";
 
-const Plot = createPlotlyComponent(Plotly);
 
 /* ------------------------------------------------------------------ palette
 
-   One colour per model, and a muted grey for the realised series. Literal strings rather
-   than CSS variables for the same reason D1's state colours are: Plotly draws the traces
-   and needs the values, so a token lookup here would be a second copy of the palette that
-   could drift from the swatches beside the table. */
+   One token per model and a neutral token for the realised series. CSS swatches use
+   the variables directly; Plotly reads their resolved values when the theme changes. */
 
-const MODEL_COLOUR: Record<VolModel, string> = {
-  garch: "#d4a843",
-  egarch: "#8b5cf6",
-  gjr_garch: "#4ade80",
-  arma_egarch_xgboost: "#60a5fa",
-  tdnn_gjr_garch: "#f59e0b",
+const MODEL_TOKEN: Record<VolModel, string> = {
+  garch: "--chart-series-1",
+  egarch: "--chart-series-2",
+  gjr_garch: "--chart-series-3",
+  arma_egarch_xgboost: "--chart-series-4",
+  tdnn_gjr_garch: "--chart-series-5",
 };
 
 /** The realised series is deliberately the dimmest trace on the chart. It is the thing
  *  being forecast, not a forecast; a bright line for it would compete with the fan the
  *  page exists to show. */
-const REALISED_COLOUR = "#888888";
+const REALISED_TOKEN = "--chart-neutral";
 
 const DISTRIBUTIONS: readonly { value: VolDistribution; label: string; detail: string }[] = [
   {
@@ -163,7 +162,7 @@ export function VolatilityPage() {
   const loadCandidates = useCallback(async () => {
     try {
       const rows = await api.listDatasets();
-      setCandidates(rows.filter((row) => row.row_count > 0));
+      setCandidates(rows.filter((row) => row.row_count > 0 && row.artifact_kind === "observations"));
     } catch {
       setCandidates([]);
     }
@@ -463,7 +462,7 @@ export function VolatilityPage() {
           <>
             Fit a variance model on a return series, score it <strong>out of sample</strong>{" "}
             with a walk-forward, and project the next bars as a fan chart. The scored run is
-            saved as a new <span className="mono">outputs</span> dataset; the source is never
+            saved as a new <span className="mono">Forecast Data</span> dataset; the source is never
             modified.
           </>
         }
@@ -481,22 +480,25 @@ export function VolatilityPage() {
             }}
           >
             <option value="">— choose a dataset —</option>
-            {candidates.map((row) => (
-              <option key={row.dataset_id} value={row.dataset_id}>
-                {row.name} · {row.category} · {row.row_count.toLocaleString()} rows
-                {row.timeframe === null ? "" : ` · ${row.timeframe}`}
-              </option>
-            ))}
+            <DatasetOptions datasets={candidates} />
           </select>
+          <C8CausalNotice datasetId={datasetId} />
+          <Description className="field__note">
+            Selecting a split loads its source observations. Forecasting uses the rolling
+            training, validation and test windows configured on this page.
+          </Description>
         </div>
       </div>
 
       {empty && (
         <div className="panel muted">
-          No dataset selected. A forecast needs a return series — fetch bars in A1, or derive
-          one in cleaning. The model is never fitted to a price level: GARCH describes the
-          variance of returns, and a price has near-unit-root behaviour that fits beautifully
-          and means nothing.
+          No dataset selected.
+          <Description anchor=".panel">
+            A forecast needs a return series — fetch bars in A1, or derive
+            one in cleaning. The model is never fitted to a price level: GARCH describes the
+            variance of returns, and a price has near-unit-root behaviour that fits beautifully
+            and means nothing.
+          </Description>
         </div>
       )}
 
@@ -536,14 +538,16 @@ export function VolatilityPage() {
 
             <div className="panel">
               <fieldset className="policy" disabled={running}>
-                <legend className="policy__legend">Where the returns come from</legend>
-                <p className="policy__hint muted">
-                  Every model here is a model of <em>returns</em>. Choosing close derives{" "}
-                  <span className="mono">diff(log(close))</span>; a column is used exactly as
-                  it is stored, so pointing this at a price, a running total or a cumulative
-                  volume is the one mistake that would matter — and the stationarity check
-                  is what catches it.
-                </p>
+                <legend className="policy__legend">Where the returns come from
+                  <Description className="policy__hint muted">
+                    Every model here is a model of <em>returns</em>. Choosing close derives{" "}
+                    <span className="mono">diff(log(close))</span>; a column is used exactly as
+                    it is stored, so pointing this at a price, a running total or a cumulative
+                    volume is the one mistake that would matter — and the stationarity check
+                    is what catches it.
+                  </Description>
+                </legend>
+
 
                 {options.sources.map((source) => (
                   <label
@@ -563,7 +567,7 @@ export function VolatilityPage() {
                     <span className="policy__body">
                       <span className="policy__label">{source.label}</span>
                       {!source.available && source.reason !== null && (
-                        <span className="policy__caution">{source.reason}</span>
+                        <Description className="policy__caution">{source.reason}</Description>
                       )}
                     </span>
                   </label>
@@ -583,10 +587,10 @@ export function VolatilityPage() {
                       <option key={name} value={name} />
                     ))}
                   </datalist>
-                  <div className="field__note">
+                  <Description className="field__note">
                     Any numeric column. It is used as given, so it must already be a return —
                     the stationarity test refuses one that is not.
-                  </div>
+                  </Description>
                 </div>
               </fieldset>
 
@@ -613,12 +617,14 @@ export function VolatilityPage() {
 
             <div className="panel">
               <fieldset className="policy" disabled={running}>
-                <legend className="policy__legend">Estimators</legend>
-                <p className="policy__hint muted">
-                  Every model refits at every scored step — that is what makes the causality
-                  guarantee possible — so a run's cost is the number of scored bars times the
-                  cost of one fit. The hybrids train a second model inside that loop.
-                </p>
+                <legend className="policy__legend">Estimators
+                  <Description className="policy__hint muted">
+                    Every model refits at every scored step — that is what makes the causality
+                    guarantee possible — so a run's cost is the number of scored bars times the
+                    cost of one fit. The hybrids train a second model inside that loop.
+                  </Description>
+                </legend>
+
 
                 {(["simple", "hybrid"] as const).map((family) => (
                   <div key={family}>
@@ -647,16 +653,16 @@ export function VolatilityPage() {
                             <span className="policy__label">
                               <span
                                 className="regime__swatch"
-                                style={{ background: MODEL_COLOUR[entry.id] }}
+                                style={{ background: `var(${MODEL_TOKEN[entry.id]})` }}
                               />{" "}
                               {entry.label}
                             </span>
-                            <span className="policy__detail muted">{entry.note}</span>
+                            <Description className="policy__detail muted">{entry.note}</Description>
                             {family === "hybrid" && (
-                              <span className="policy__caution">
+                              <Description className="policy__caution">
                                 Refits a second model at every scored step — the slowest
                                 option here by a wide margin.
-                              </span>
+                              </Description>
                             )}
                           </span>
                         </label>
@@ -668,11 +674,11 @@ export function VolatilityPage() {
               <div className="vol__grid">
                 <div className="field">
                   <label>Distribution of the standardised shock</label>
-                  <div className="field__note" style={{ marginTop: 0 }}>
+                  <Description className="field__note" style={{ marginTop: 0 }}>
                     How the model describes the shape of what it cannot predict. It changes
                     the likelihood, so it changes the fitted parameters — not just the
                     confidence bands.
-                  </div>
+                  </Description>
                   {DISTRIBUTIONS.map((entry) => (
                     <label className="vol__radio" key={entry.value}>
                       <input
@@ -685,7 +691,7 @@ export function VolatilityPage() {
                       />
                       <span>
                         <strong>{entry.label}</strong>{" "}
-                        <span className="muted">{entry.detail}</span>
+                        <Description className="muted">{entry.detail}</Description>
                       </span>
                     </label>
                   ))}
@@ -705,7 +711,7 @@ export function VolatilityPage() {
                       />
                       <span>
                         <strong>{entry.label}</strong>{" "}
-                        <span className="muted">{entry.detail}</span>
+                        <Description className="muted">{entry.detail}</Description>
                       </span>
                     </label>
                   ))}
@@ -735,9 +741,9 @@ export function VolatilityPage() {
                     disabled={running}
                     onChange={(event) => setTrainWindow(Number(event.target.value))}
                   />
-                  <div className="field__note">
+                  <Description className="field__note">
                     Bars one fit may see, immediately before the bar it forecasts.
-                  </div>
+                  </Description>
                 </div>
 
                 <div className="field">
@@ -750,11 +756,11 @@ export function VolatilityPage() {
                     disabled={running}
                     onChange={(event) => setTestWindow(Number(event.target.value))}
                   />
-                  <div className="field__note">
+                  <Description className="field__note">
                     The <strong>last</strong> this many bars are scored, so the sample size
                     the Diebold–Mariano test has to work with is a number you choose rather
                     than one that follows from the series length.
-                  </div>
+                  </Description>
                 </div>
 
                 <div className="field">
@@ -767,11 +773,11 @@ export function VolatilityPage() {
                     disabled={running}
                     onChange={(event) => setStepSize(Number(event.target.value))}
                   />
-                  <div className="field__note">
+                  <Description className="field__note">
                     How far the window rolls between refits. This is a cost knob, not a
                     leakage knob — every fit still sees only its own past — but a larger
                     step scores fewer bars.
-                  </div>
+                  </Description>
                 </div>
 
                 <div className="field">
@@ -781,7 +787,7 @@ export function VolatilityPage() {
                     {trainWindow + testWindow} bars needed,{" "}
                     {options.usable_returns} available
                   </div>
-                  <div className="field__note">
+                  <Description className="field__note">
                     {nScored} one-step forecasts will be scored, each from a model refitted
                     on the {trainWindow} bars behind it.
                     {needsLags && (
@@ -790,20 +796,22 @@ export function VolatilityPage() {
                         A hybrid additionally trains its correction at each of those steps.
                       </>
                     )}
-                  </div>
+                  </Description>
                 </div>
               </div>
 
               <fieldset className="policy" disabled={running}>
-                <legend className="policy__legend">Parameters</legend>
-                <p className="policy__hint muted">
-                  Only the parameters a selected model consumes are live. A control that
-                  changes nothing is disabled with the reason, rather than left to look
-                  effective.{" "}
-                  {selected.length === 0
-                    ? "No model is selected."
-                    : `Selected: ${selected.map((entry) => entry.label).join(", ")}.`}
-                </p>
+                <legend className="policy__legend">Parameters
+                  <Description className="policy__hint muted">
+                    Only the parameters a selected model consumes are live. A control that
+                    changes nothing is disabled with the reason, rather than left to look
+                    effective.{" "}
+                    {selected.length === 0
+                      ? "No model is selected."
+                      : `Selected: ${selected.map((entry) => entry.label).join(", ")}.`}
+                  </Description>
+                </legend>
+
 
                 <div className="vol__grid">
                   <div className="field">
@@ -833,11 +841,11 @@ export function VolatilityPage() {
                         setOrder((current) => ({ ...current, o: Number(event.target.value) }))
                       }
                     />
-                    <div className="field__note">
+                    <Description className="field__note">
                       {needsO
                         ? "EGARCH needs at least 1; GJR-GARCH is defined by exactly 1."
                         : "No selected model has an asymmetry term — a plain GARCH does not read this."}
-                    </div>
+                    </Description>
                   </div>
                   <div className="field">
                     <label htmlFor="vol-q">GARCH order (q)</label>
@@ -864,11 +872,11 @@ export function VolatilityPage() {
                       disabled={running || !needsLags}
                       onChange={(event) => setLags(Number(event.target.value))}
                     />
-                    <div className="field__note">
+                    <Description className="field__note">
                       {needsLags
                         ? "How far the hybrid features reach back. Each lag contributes the return and its absolute value, plus the same lags of any conditioning columns — all strictly in the past."
                         : "Only the hybrid models read this."}
-                    </div>
+                    </Description>
                   </div>
                 </div>
               </fieldset>
@@ -885,11 +893,11 @@ export function VolatilityPage() {
                     disabled={running}
                     onChange={(event) => setHorizon(Number(event.target.value))}
                   />
-                  <div className="field__note">
+                  <Description className="field__note">
                     Bars projected past the last observation — what the fan chart draws. This
                     is <strong>not</strong> the scored forecast: MQLIKE and the rest are
                     defined against a realised value, and a projection has none.
-                  </div>
+                  </Description>
                 </div>
 
                 <div className="field">
@@ -908,13 +916,13 @@ export function VolatilityPage() {
                       </option>
                     ))}
                   </select>
-                  <div className="field__note">
+                  <Description className="field__note">
                     A Module D regime output, joined on{" "}
                     <span className="mono">open_time</span> and used as{" "}
                     <strong>lagged</strong> features by the hybrid models. The plain arch
                     family ignores it. Unusable entries are listed with their reason rather
                     than hidden.
-                  </div>
+                  </Description>
                   {conditioning !== "" && (
                     <div
                       className={
@@ -947,11 +955,11 @@ export function VolatilityPage() {
                     disabled={running}
                     onChange={(event) => setOutName(event.target.value)}
                   />
-                  <div className="field__note">
-                    The run is saved as a new <span className="mono">outputs</span> dataset
+                  <Description className="field__note">
+                    The run is saved as a new <span className="mono">Forecast Data</span> dataset
                     carrying the whole request in its lineage, so it can be reproduced from
                     the record alone.
-                  </div>
+                  </Description>
                 </div>
               </div>
             </div>
@@ -988,11 +996,11 @@ export function VolatilityPage() {
               </div>
             )}
 
-            <div className="panel muted" style={{ fontSize: 12 }}>
+            <Description className="panel muted" style={{ fontSize: 12 }}>
               The run happens in the background: pressing Run returns a job immediately and
               the page polls it. Stopping the wait does not stop the job — it still lands in
               the registry, and its output is still saved.
-            </div>
+            </Description>
           </div>
 
           {/* ======================================================= results */}
@@ -1236,13 +1244,13 @@ function Results({
             tail={result.preview.tail}
             rowCount={result.dataset?.row_count ?? 0}
           />
-          <div className="field__note">
+          <Description className="field__note">
             The stored frame is the <strong>scored walk-forward span only</strong> — real
             bars, each with the forecast that was made for it before it happened. The forward
             path is not written to the store: a dataset row in this application is an
             observation, and a projection of the next {report.forecast_horizon} bars is not
             one.
-          </div>
+          </Description>
         </div>
       </div>
     </>
@@ -1335,7 +1343,7 @@ function MetricsTable({
             <td>
               <span
                 className="regime__swatch"
-                style={{ background: MODEL_COLOUR[score.model] }}
+                style={{ background: `var(${MODEL_TOKEN[score.model]})` }}
               />{" "}
               {score.model}
             </td>
@@ -1450,7 +1458,7 @@ function FanChart({
  * against a return: a 3% bar. Variance is what the models are fitted on and what the table
  * scores, and mixing the two on one axis is the commonest way a volatility chart misleads.
  */
-function buildFan(
+export function buildFan(
   report: VolForecastReport,
   scored: Record<string, ScoredPoint[]>,
   chartModel: VolModel | null,
@@ -1465,7 +1473,7 @@ function buildFan(
       name: "realised (scored span)",
       x: realised.map((point) => point.time),
       y: realised.map((point) => point.actual),
-      line: { color: REALISED_COLOUR, width: 1 },
+      line: { color: themeColor(REALISED_TOKEN), width: 1 },
       hovertemplate: "realised %{y:.4f}<extra></extra>",
     });
   }
@@ -1473,7 +1481,7 @@ function buildFan(
   for (const path of report.forward_paths) {
     const times = path.times.map((value) => new Date(value).getTime());
     const isBandModel = path.model === chartModel;
-    const colour = MODEL_COLOUR[path.model];
+    const colour = themeColor(MODEL_TOKEN[path.model]);
 
     if (isBandModel) {
       for (const band of path.bands) {
@@ -1546,7 +1554,8 @@ function buildFan(
 
 /** The two bands, at different opacities, so the 25–75% is legible inside the 5–95%. */
 function fillFor(label: string, colour: string): string {
-  const alpha = label.startsWith("5") ? 0.16 : 0.24;
+  const t = chartTheme();
+  const alpha = label.startsWith("5") ? t.bandOuterOpacity : t.bandInnerOpacity;
   return hexAlpha(colour, alpha);
 }
 

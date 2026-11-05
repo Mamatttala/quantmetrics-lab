@@ -19,12 +19,12 @@
  */
 
 import { api } from "./client";
-import type { JobRecord, RegimeRunResult } from "./types";
+import type { JobRecord } from "./types";
 
 /** Interval between polls, in ms, indexed by attempt and clamped to the last entry. */
 const BACKOFF_MS = [250, 400, 650, 1_000, 1_500, 2_000, 3_000];
 
-export interface WaitOptions<TResult = RegimeRunResult> {
+export interface WaitOptions<TResult = unknown> {
   /** Aborts the wait. The job itself is unaffected — it is running on the server. */
   signal?: AbortSignal;
   /** Called after each poll, so the page can show elapsed time or a request count. */
@@ -49,7 +49,7 @@ export class JobAborted extends Error {
  * `TResult` names what the job's own kind carries — Module D's detection or C7's scaling —
  * so a page reads its result without narrowing a union the job registry already decided.
  */
-export async function waitForJob<TResult = RegimeRunResult>(
+export async function waitForJob<TResult = unknown>(
   jobId: string,
   { signal, onPoll }: WaitOptions<TResult> = {},
 ): Promise<JobRecord<TResult>> {

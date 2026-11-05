@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -77,7 +78,7 @@ export function FeatureEngineering() {
   const loadCandidates = useCallback(async () => {
     try {
       const rows = await api.listDatasets();
-      setCandidates(rows.filter((row) => row.row_count > 0));
+      setCandidates(rows.filter((row) => row.row_count > 0 && row.artifact_kind === "observations"));
     } catch {
       setCandidates([]);
     }
@@ -358,19 +359,22 @@ export function FeatureEngineering() {
               </option>
             ))}
           </select>
-          <p className="field__note">
+          <Description className="field__note">
             The catalogue is resolved against the chosen dataset: a feature that needs a
             column, a bar length, or a crypto market this dataset does not have is
             offered disabled, with the reason beside it.
-          </p>
+          </Description>
         </div>
       </div>
 
       {empty && (
         <div className="panel muted">
-          No dataset selected. Features are computed from a stored dataset — fetch one in
-          A1 or upload a file in Data Management — and the result is saved as a new{" "}
-          <span className="mono">processed_data</span> child, leaving the input untouched.
+          No dataset selected.
+          <Description anchor=".panel">
+            Features are computed from a stored dataset — fetch one in
+            A1 or upload a file in Data Management — and the result is saved as a new{" "}
+            <span className="mono">processed_data</span> child, leaving the input untouched.
+          </Description>
         </div>
       )}
 
@@ -429,7 +433,7 @@ export function FeatureEngineering() {
                   <input
                     id="features-name"
                     type="text"
-                    placeholder="(defaults to the source name plus “features”)"
+                    placeholder="leave blank for the standard generated name"
                     value={outName}
                     onChange={(event) => setOutName(event.target.value)}
                   />
@@ -443,7 +447,7 @@ export function FeatureEngineering() {
                     />
                     <span>Keep only the generated columns</span>
                   </label>
-                  <p className="field__note">
+                  <Description className="field__note">
                     Off, the dataset&apos;s own columns are kept alongside the new ones.
                     On, the output holds the generated columns and the timestamp only —
                     which is what a model matrix usually wants, but it also means the
@@ -451,7 +455,7 @@ export function FeatureEngineering() {
                     {catalog !== null && !catalog.has_time
                       ? " This dataset has no recognisable timestamp column, so nothing would be kept alongside them."
                       : ""}
-                  </p>
+                  </Description>
                 </div>
               </div>
 
@@ -508,7 +512,7 @@ export function FeatureEngineering() {
                 onClick={() => void run(false)}
                 disabled={running !== null || !canRun}
               >
-                {running === "preview" ? "Running…" : "Preview (store nothing)"}
+                {running === "preview" ? "Running…" : "Preview"}
               </button>
               <button
                 type="button"
@@ -516,7 +520,7 @@ export function FeatureEngineering() {
                 onClick={() => void run(true)}
                 disabled={running !== null || !canRun}
               >
-                {running === "save" ? "Saving…" : "Apply and save as new dataset"}
+                {running === "save" ? "Saving…" : "Save as new dataset"}
               </button>
               <button
                 type="button"
@@ -551,13 +555,13 @@ export function FeatureEngineering() {
               </div>
             )}
 
-            <div className="panel muted" style={{ fontSize: 12 }}>
+            <Description className="panel muted" style={{ fontSize: 12 }}>
               Preview computes every column over the real frame and stores nothing. Saving
               writes one new <strong>processed_data</strong> dataset whose lineage records
               the source dataset, the price series, and a hash of the exact selection —
               so the same request can be reproduced from the report alone. No row is
               added or removed by either.
-            </div>
+            </Description>
           </div>
 
           {/* ============================================================= result */}
@@ -772,7 +776,7 @@ export function FeatureEngineering() {
                       className="btn btn--ghost btn--sm"
                       onClick={() =>
                         window.open(
-                          `/api/datasets/${result.dataset?.dataset_id}/export?format=${format}`,
+                          api.datasetExportUrl(result.dataset!.dataset_id, format),
                         )
                       }
                     >

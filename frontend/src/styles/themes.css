@@ -1,0 +1,255 @@
+/* Additive themes. tokens.css remains the source of the unchanged Light/Dark palettes.
+ * Legacy defaults below replace formerly literal component colors without changing them. */
+:root {
+  --color-positive: #4ade80;
+  --color-negative: #ef4444;
+  --color-success: var(--ok);
+  --color-warning: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-accent: var(--accent);
+  --color-focus: var(--accent);
+  --selection-bg: rgba(212, 168, 67, 0.3);
+  --accent-active-bg: rgba(212, 168, 67, 0.2);
+  --focus-halo: rgba(212, 168, 67, 0.2);
+  --select-arrow: var(--accent-dim);
+  --checkbox-check: #ffffff;
+  --danger-hover: rgba(239, 68, 68, 0.12);
+  --danger-menu-hover: rgba(239, 68, 68, 0.14);
+  --success-border: rgba(74, 222, 128, 0.5);
+  --danger-border: rgba(239, 68, 68, 0.55);
+  --chart-series-1: #d4a843;
+  --chart-series-2: #8b5cf6;
+  --chart-series-3: #4ade80;
+  --chart-series-4: #60a5fa;
+  --chart-series-5: #f59e0b;
+  --chart-neutral: #888888;
+  --chart-state-up: var(--chart-series-1);
+  --chart-state-down: var(--chart-series-2);
+  --chart-state-crisis: #ef4444;
+  --chart-state-transition: #2a2a2a;
+  --chart-heatmap-low: var(--bg-chart);
+  --chart-heatmap-high: var(--accent-gold);
+  --chart-volume: rgba(136,136,136,0.5);
+  --chart-volume-up: rgba(74,222,128,0.42);
+  --chart-volume-down: rgba(239,68,68,0.42);
+  --chart-band-outer-opacity: 0.16;
+  --chart-band-inner-opacity: 0.24;
+  --quality-extreme: #8b5cf6;
+  --quality-invalid: #ef4444;
+  --quality-warning: #fbbf24;
+  --quality-missing: #888888;
+  --quality-unknown: #888888;
+  --timeline-train: var(--ok);
+  --timeline-validation: var(--warn);
+  --timeline-test: var(--accent);
+}
+
+/* A preview of Dark needs its own four values when shown inside another theme.
+ * Light and the new themes already have explicit data-theme palette selectors. */
+.theme-preview[data-theme="dark"] {
+  --bg-main: #111111;
+  --bg-card: #1c1c1c;
+  --accent-gold: #d4a843;
+  --text-primary: #f0f0f0;
+}
+
+/* Shared mappings apply only to the three additions. Existing token names stay valid. */
+[data-theme="finance-light"],
+[data-theme="nord"],
+[data-theme="simple-dark"] {
+  --bg-explorer: var(--bg-sidebar);
+  --bg-input: var(--bg-main);
+  --bg-chart: var(--bg-main);
+  --bg-status: var(--bg-sidebar);
+  --text-code: var(--text-primary);
+  --accent-purple: var(--accent-gold);
+  --border-input: var(--border-card);
+  --border-explorer: var(--border-card);
+  --border-inactive: var(--border-card);
+  --border-grid: var(--border-card);
+  --chart-grid: var(--border-card);
+  --chart-zero: var(--border-card);
+  --chart-axis: var(--text-secondary);
+  --card-head: var(--bg-sidebar);
+  --raised: var(--bg-card);
+  --raised-2: var(--bg-hover);
+  --accent-press: var(--accent-gold-hover);
+  --accent-bright: var(--accent-gold);
+  --accent-bright-hover: var(--accent-gold-hover);
+  --accent-dim: color-mix(in srgb, var(--accent-gold) 12%, transparent);
+  --nav-hover-border: var(--text-secondary);
+  --nav-active-bg: var(--bg-selected);
+  --nav-active-text: var(--text-primary);
+  --toggle-bg: var(--bg-card);
+  --toggle-border: var(--border-card);
+  --toggle-icon: var(--accent-gold);
+  --checkbox-bg: var(--bg-input);
+  --checkbox-border: var(--text-secondary);
+  --checkbox-check: var(--on-accent);
+  --feature-hover: var(--bg-selected);
+  --feature-off: var(--bg-sidebar);
+  --table-row-hover: var(--bg-hover);
+  --chart-overlay: color-mix(in srgb, var(--bg-main) 94%, transparent);
+  --explorer-head: var(--bg-sidebar);
+  --explorer-hover: var(--bg-hover);
+  --explorer-sel-bg: var(--bg-selected);
+  --explorer-sel-border: var(--accent-gold);
+  --explorer-sel-text: var(--text-primary);
+  --explorer-item: var(--text-secondary);
+  --explorer-item-parent: var(--text-primary);
+  --explorer-text: var(--text-secondary);
+  --explorer-text-strong: var(--text-primary);
+  --explorer-chevron: var(--text-secondary);
+  --explorer-title: var(--text-secondary);
+  --explorer-btn-border: var(--border-card);
+  --explorer-scroll: var(--border-card);
+  --explorer-scroll-hover: var(--text-secondary);
+  --grid-odd: color-mix(in srgb, var(--text-primary) 3%, transparent);
+  --grid-row-hover: var(--accent-dim);
+  --grid-selected: color-mix(in srgb, var(--accent-gold) 16%, transparent);
+  --grid-cell-selected: color-mix(in srgb, var(--accent-gold) 18%, transparent);
+  --grid-cell-selected-border: var(--accent-gold);
+  --grid-cell-dirty: color-mix(in srgb, var(--warn) 14%, transparent);
+  --color-positive: var(--ok);
+  --color-negative: var(--danger);
+  --selection-bg: color-mix(in srgb, var(--accent-gold) 25%, transparent);
+  --accent-active-bg: color-mix(in srgb, var(--accent-gold) 20%, transparent);
+  --focus-halo: color-mix(in srgb, var(--accent-gold) 30%, transparent);
+  --select-arrow: var(--accent-gold);
+  --danger-hover: color-mix(in srgb, var(--danger) 12%, transparent);
+  --danger-menu-hover: color-mix(in srgb, var(--danger) 14%, transparent);
+  --success-border: var(--ok);
+  --danger-border: var(--danger);
+  --chart-state-up: var(--ok);
+  --chart-state-down: var(--danger);
+  --chart-state-crisis: var(--warn);
+  --chart-state-transition: var(--border-card);
+  --quality-extreme: var(--warn);
+  --quality-invalid: var(--danger);
+  --quality-warning: var(--warn);
+  --quality-missing: var(--warn);
+  --quality-unknown: var(--info);
+  --timeline-train: var(--chart-series-1);
+  --timeline-validation: var(--chart-series-2);
+  --timeline-test: var(--chart-series-3);
+}
+
+[data-theme="finance-light"] {
+  color-scheme: light;
+  --bg-main: #ffffff;
+  --bg-sidebar: #f6f8fa;
+  --bg-card: #f6f8fa;
+  --bg-hover: #eaeef2;
+  --bg-selected: #ddf4ff;
+  --border-card: #d0d7de;
+  --text-primary: #1f2328;
+  --text-secondary: #59636e;
+  --text-muted: #66717d;
+  --accent-gold: #0969da;
+  --accent-gold-hover: #0550ae;
+  --on-accent: #ffffff;
+  --ok: #1a7f37;
+  --danger: #cf222e;
+  --warn: #9a6700;
+  --info: #0969da;
+  --chart-series-1: #0969da;
+  --chart-series-2: #8250df;
+  --chart-series-3: #9a6700;
+  --chart-series-4: #0e6f7c;
+  --chart-series-5: #a13d73;
+  --chart-neutral: #59636e;
+  --chart-volume: rgba(89,99,110,0.5);
+  --chart-volume-up: rgba(26,127,55,0.42);
+  --chart-volume-down: rgba(207,34,46,0.42);
+  --chart-band-outer-opacity: 0.12;
+  --chart-band-inner-opacity: 0.24;
+  --cloud: rgba(89,99,110,0.18);
+  --band: rgba(89,99,110,0.14);
+  --popover-shadow: 0 10px 28px rgba(31,35,40,0.16);
+  --tooltip-shadow: 0 2px 8px rgba(31,35,40,0.15);
+  --modal-shadow: 0 4px 16px rgba(31,35,40,0.2);
+  --overlay: rgba(31,35,40,0.3);
+}
+
+[data-theme="nord"] {
+  color-scheme: dark;
+  --bg-main: #2e3440;
+  --bg-sidebar: #3b4252;
+  --bg-card: #3b4252;
+  --bg-hover: #434c5e;
+  --bg-selected: #434c5e;
+  --border-card: #4c566a;
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-muted: #d8dee9;
+  --accent-gold: #88c0d0;
+  --accent-gold-hover: #8fbcbb;
+  --on-accent: #2e3440;
+  --ok: #a3be8c;
+  --danger: #bf616a;
+  /* Snow Storm mixed into Aurora red keeps small error text readable on Polar Night. */
+  --color-danger: color-mix(in srgb, #bf616a 45%, #eceff4);
+  --warn: #ebcb8b;
+  --info: #88c0d0;
+  --chart-series-1: #88c0d0;
+  --chart-series-2: #b48ead;
+  --chart-series-3: #d08770;
+  --chart-series-4: #81a1c1;
+  --chart-series-5: #ebcb8b;
+  --chart-neutral: #d8dee9;
+  --chart-volume: rgba(216,222,233,0.5);
+  --chart-volume-up: rgba(163,190,140,0.42);
+  --chart-volume-down: rgba(191,97,106,0.42);
+  --chart-band-outer-opacity: 0.14;
+  --chart-band-inner-opacity: 0.26;
+  --cloud: rgba(216,222,233,0.18);
+  --band: rgba(216,222,233,0.14);
+  --popover-shadow: 0 10px 28px rgba(46,52,64,0.55);
+  --tooltip-shadow: 0 2px 8px rgba(46,52,64,0.5);
+  --modal-shadow: 0 8px 28px rgba(46,52,64,0.6);
+  --overlay: rgba(46,52,64,0.65);
+}
+
+[data-theme="simple-dark"] {
+  color-scheme: dark;
+  --bg-main: #0f1115;
+  --bg-sidebar: #161a20;
+  --bg-card: #161a20;
+  --bg-hover: #1d242d;
+  --bg-selected: #1c304b;
+  --border-card: #232a33;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #8b949e;
+  --accent-gold: #2f81f7;
+  --accent-gold-hover: #58a6ff;
+  --on-accent: #0f1115;
+  --ok: #3fb950;
+  --danger: #f85149;
+  --warn: #d29922;
+  --info: #58a6ff;
+  --chart-series-1: #2f81f7;
+  --chart-series-2: #bc8cff;
+  --chart-series-3: #d29922;
+  --chart-series-4: #76c8dd;
+  --chart-series-5: #f0b6d2;
+  --chart-neutral: #8b949e;
+  --chart-volume: rgba(139,148,158,0.5);
+  --chart-volume-up: rgba(63,185,80,0.42);
+  --chart-volume-down: rgba(248,81,73,0.42);
+  --chart-band-outer-opacity: 0.14;
+  --chart-band-inner-opacity: 0.26;
+  --cloud: rgba(139,148,158,0.18);
+  --band: rgba(139,148,158,0.14);
+  --popover-shadow: 0 10px 28px rgba(0,0,0,0.5);
+  --tooltip-shadow: 0 2px 8px rgba(0,0,0,0.5);
+  --modal-shadow: 0 8px 28px rgba(0,0,0,0.6);
+  --overlay: rgba(0,0,0,0.65);
+}
+
+/* Numeral alignment for the new palettes; legacy typography is untouched. */
+:where([data-theme="finance-light"], [data-theme="nord"], [data-theme="simple-dark"])
+:is(table, .report, .chart, .feature__status, .regime__gauge-value) {
+  font-variant-numeric: tabular-nums;
+}

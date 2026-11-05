@@ -1,20 +1,9 @@
 """Module C7 — scaling and normalisation over HTTP.
 
-Two things in this module are shaped by the same rule, and the rule is worth stating once:
-**a scaler may only ever be fitted on rows the model is allowed to see.** The three fitted
-scalers here (min-max, standard, robust) each reduce a column to a fixed pair of numbers
-estimated from a stretch of history, and if that stretch is the whole series then every
-training row carries the mean and range of the rows the model will be scored on. The
-transformed frame looks entirely normal; the only symptom is a backtest that is too good.
-
-So ``split_plan_id`` is a *required* field of the request for those three — required in the
-type system, not merely checked in the service — and the rolling z-score, which has nothing
-to leak, is the one member that may omit it. See ``ScalerType.needs_split_plan``.
-
-The second: a walk-forward plan is a *set* of train/test pairs, one per fold, and scaling
-against it needs to know which one. Pooling every fold's training rows into a single fit
-would compute fold 1's statistics from rows lying after fold 1's test span — look-ahead
-relative to that fold, and invisible. Hence ``fold``, required for a TSCV plan.
+Fitted scalers accept an optional split plan. Without one, they estimate parameters from
+the entire selected dataset. With one, they fit only its training rows, which is the scope
+to use for model evaluation. Walk-forward plans require a fold. Rolling z-score estimates
+statistics per row from a trailing window and takes neither a plan nor a fold.
 """
 
 from __future__ import annotations
@@ -44,9 +33,8 @@ class ScalingRequest(BaseModel):
     dataset_id: str
     scaler_type: ScalerType
 
-    #: Required for every scaler that is *fitted*. Absent for the rolling z-score, which
-    #: estimates its statistics per row from a trailing window and therefore has nothing
-    #: to leak — and for which a plan would be meaningless rather than merely optional.
+    #: Optional for fitted scalers: absent means fit the entire selected dataset.
+    #: A supplied plan restricts fitting to its training rows. Rolling takes no plan.
     split_plan_id: str | None = None
 
     #: Which fold of a walk-forward plan to fit against. Required for a TSCV plan, refused
@@ -69,14 +57,11 @@ class ScalingRequest(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> ScalingRequest:
-        if self.scaler_type.needs_split_plan and self.split_plan_id is None:
-            raise ValueError(
-                f"{self.scaler_type.value} is fitted on a stretch of history, so it needs "
-                "split_plan_id to say which rows it may be fitted on. Without one it "
-                "would be fitted on the whole series, including the rows the model will "
-                "be scored on. Use rolling_zscore if you want a scaler that needs no plan."
-            )
-        if not self.scaler_type.needs_split_plan and self.split_plan_id is not None:
+        if self.split_plan_id is not None and not self.split_plan_id.strip():
+            raise ValueError("split_plan_id must be a saved plan ID or null.")
+        if self.fold is not None and self.split_plan_id is None:
+            raise ValueError("fold requires a split_plan_id.")
+        if not self.scaler_type.is_fitted and self.split_plan_id is not None:
             raise ValueError(
                 "rolling_zscore estimates its statistics from a trailing window at each "
                 "row, so it is causal by construction and takes no split plan. Applying "
@@ -146,16 +131,15 @@ class ScalingReport(BaseModel):
     dataset_name: str
     scaler_type: ScalerType
 
-    #: The plan the fit was constrained to, and the fold within it. Both null for a
-    #: rolling z-score, which uses neither.
+    #: The plan and fold, or null for full-dataset fitting and rolling z-score.
     split_plan_id: str | None
     split_plan_name: str | None
     fold: int | None
 
-    #: Which rows the parameters were estimated from, as the plan recorded them. Repeated
-    #: here rather than left to be looked up, because this is the sentence that says
-    #: whether the run was legitimate and it should not require a second request.
+    #: Resolved fit scope (train, full_dataset, or trailing window), count and bounds.
     fit_role: str | None
+    fit_dataset_id: str
+    fit_dataset_name: str
     fit_rows: int
     fit_start_time: Any = None
     fit_end_time: Any = None

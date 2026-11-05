@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.models.dataset import DatasetMeta
 from app.models.enums import (
@@ -21,6 +21,7 @@ from app.models.enums import (
     Provider,
     Timeframe,
 )
+from app.models.naming import named_metadata
 from app.storage import parquet_store
 from app.storage.catalog import Catalog
 
@@ -45,7 +46,7 @@ def default_name(
 
 class IngestService:
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
 
     async def register(
@@ -110,6 +111,7 @@ class IngestService:
                 unpopulated_fields=unpopulated_fields or [],
                 provenance=provenance or {},
             )
+            meta = named_metadata(meta)
             self.catalog.insert_dataset(meta)
             return meta, False
 

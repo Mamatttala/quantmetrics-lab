@@ -6,6 +6,7 @@ import { App } from "./App";
 import { ThemeProvider } from "./theme";
 
 import "./styles/tokens.css";
+import "./styles/themes.css";
 import "./styles/global.css";
 import "./styles/layout.css";
 import "./styles/data.css";

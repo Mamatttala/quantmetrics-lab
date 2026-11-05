@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -109,7 +110,7 @@ export function ResampleMerge() {
   const loadCandidates = useCallback(async () => {
     try {
       const rows = await api.listDatasets();
-      setCandidates(rows.filter((dataset) => dataset.row_count > 0));
+      setCandidates(rows.filter((dataset) => dataset.row_count > 0 && dataset.artifact_kind === "observations"));
     } catch {
       setCandidates([]);
     }
@@ -477,11 +478,11 @@ export function ResampleMerge() {
                       </option>
                     ))}
                   </select>
-                  <p className="field__note">
+                  <Description className="field__note">
                     {base.timeframe === null
                       ? "This dataset declares no timeframe, so the API cannot check the target against the source interval — it will warn that a finer target would fabricate bars."
                       : `This dataset declares ${base.timeframe}. A coarser target aggregates its bars; a finer one is refused, because building four 15-minute bars from one hourly bar invents price paths no market produced.`}
-                  </p>
+                  </Description>
                 </div>
 
                 <div className="field">
@@ -489,11 +490,11 @@ export function ResampleMerge() {
                   <input
                     id="merge-name"
                     type="text"
-                    placeholder="(defaults to the base name plus “merged”)"
+                    placeholder="leave blank for the standard generated name"
                     value={outName}
                     onChange={(e) => setOutName(e.target.value)}
                   />
-                  <p className="field__note">
+                  <Description className="field__note">
                     Aggregation is fixed by column name: <span className="mono">open</span>{" "}
                     first, <span className="mono">high</span> max,{" "}
                     <span className="mono">low</span> min, <span className="mono">close</span>{" "}
@@ -501,7 +502,7 @@ export function ResampleMerge() {
                     column takes its <em>last</em> value in the interval — a level such as
                     open interest or a funding rate is observed at an instant, and
                     averaging it reports a value that was never observed.
-                  </p>
+                  </Description>
                 </div>
               </div>
             </div>
@@ -517,9 +518,12 @@ export function ResampleMerge() {
 
             {joins.length === 0 && (
               <div className="panel muted">
-                No dataset selected. Add one below — funding rates, open interest, or
-                metrics for the same symbol — and it will be aligned onto the base&apos;s
-                timeline. Each one becomes a parent of the merged dataset in the lineage.
+                No dataset selected.
+                <Description anchor=".panel">
+                  Add one below — funding rates, open interest, or
+                  metrics for the same symbol — and it will be aligned onto the base&apos;s
+                  timeline. Each one becomes a parent of the merged dataset in the lineage.
+                </Description>
               </div>
             )}
 
@@ -583,10 +587,10 @@ export function ResampleMerge() {
                           updateJoin(row.key, { tolerance: e.target.value })
                         }
                       />
-                      <p className="field__note">
+                      <Description className="field__note">
                         Leave empty to accept a value of any age. A funding rate published
                         six months ago would then still be attached to today&apos;s bar.
-                      </p>
+                      </Description>
                     </div>
                   </div>
 
@@ -620,9 +624,9 @@ export function ResampleMerge() {
                 Add dataset to merge
               </button>
               {joinCandidates.length === 0 && (
-                <span className="muted" style={{ fontSize: 12 }}>
+                <Description anchor=".actions" className="muted" style={{ fontSize: 12 }}>
                   No other dataset is available to merge. Fetch or upload one first.
-                </span>
+                </Description>
               )}
             </div>
           </div>
@@ -669,13 +673,13 @@ export function ResampleMerge() {
               </div>
             )}
 
-            <div className="panel muted" style={{ fontSize: 12 }}>
+            <Description className="panel muted" style={{ fontSize: 12 }}>
               Preview runs the whole pipeline — resample, align, and join — against the
               real frames and stores nothing. Removing or renaming a column below changes
               the table immediately but is only sent with the save, so saving writes one
               new <strong>processed_data</strong> dataset whose lineage lists every input
               as a parent, with the alignment method recorded per input.
-            </div>
+            </Description>
           </div>
 
           {/* ============================================================ result */}
@@ -959,7 +963,7 @@ export function ResampleMerge() {
                       className="btn btn--ghost btn--sm"
                       onClick={() =>
                         window.open(
-                          `/api/datasets/${result.dataset?.dataset_id}/export?format=${format}`,
+                          api.datasetExportUrl(result.dataset!.dataset_id, format),
                         )
                       }
                     >

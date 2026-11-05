@@ -87,9 +87,10 @@ def test_sixty_twenty_twenty_uses_its_own_ratio():
 
 def test_tscv_expanding_folds_train_on_everything_before():
     spans, _ = build_spans(
-        100, hourly_frame(100)["open_time"], SplitType.TSCV_EXPANDING, _params(n_folds=4)
+        100, hourly_frame(100)["open_time"], SplitType.TSCV_EXPANDING,
+        _params(n_folds=4, include_validation=True),
     )
-    assert len(spans) == 8
+    assert len(spans) == 12
     for fold in range(1, 5):
         train = next(s for s in spans if s.fold == fold and s.role is SplitRole.TRAIN)
         test = next(s for s in spans if s.fold == fold and s.role is SplitRole.TEST)
@@ -97,22 +98,24 @@ def test_tscv_expanding_folds_train_on_everything_before():
         # `end` is exclusive, so equality here means the two spans are adjacent with no row
         # between them — which is what gap_size 0 asks for.
         assert train.end <= test.start
-        assert test.start == fold * 20
+        val = next(s for s in spans if s.fold == fold and s.role is SplitRole.VAL)
+        assert train.end == val.start == fold * 16
+        assert val.end == test.start == (fold + 1) * 16
 
 
 def test_tscv_rolling_folds_train_on_one_block():
     spans, _ = build_spans(
-        100, hourly_frame(100)["open_time"], SplitType.TSCV_ROLLING, _params(n_folds=4)
+        100, hourly_frame(100)["open_time"], SplitType.TSCV_ROLLING,
+        _params(n_folds=4, include_validation=True),
     )
     for fold in range(1, 5):
         train = next(s for s in spans if s.fold == fold and s.role is SplitRole.TRAIN)
-        assert train.start == (fold - 1) * 20
-        assert train.rows == 20
+        assert train.start == (fold - 1) * 16
+        assert train.rows == 16
 
 
 def test_tscv_last_fold_absorbs_the_remainder():
-    # 103 rows, 4 folds → block 20, so fold 4's test would end at 100 and rows 100..102
-    # would never be tested. They are given to the last fold instead.
+    # 103 rows, 4 folds: five blocks of 20, with the remainder in the last test.
     spans, _ = build_spans(
         103, hourly_frame(103)["open_time"], SplitType.TSCV_EXPANDING, _params(n_folds=4)
     )
@@ -120,9 +123,10 @@ def test_tscv_last_fold_absorbs_the_remainder():
     assert last.end == 103
 
 
-def test_tscv_test_spans_are_disjoint_and_cover_everything_after_the_first_block():
+def test_tscv_test_spans_are_disjoint_and_cover_everything_after_the_first_two_blocks():
     spans, _ = build_spans(
-        100, hourly_frame(100)["open_time"], SplitType.TSCV_EXPANDING, _params(n_folds=4)
+        100, hourly_frame(100)["open_time"], SplitType.TSCV_EXPANDING,
+        _params(n_folds=4, include_validation=True),
     )
     tested = [
         index
@@ -130,7 +134,7 @@ def test_tscv_test_spans_are_disjoint_and_cover_everything_after_the_first_block
         if span.role is SplitRole.TEST
         for index in range(span.start, span.end)
     ]
-    assert tested == list(range(20, 100))
+    assert tested == list(range(32, 100))
 
 
 def test_every_fold_trains_before_it_tests():
@@ -237,13 +241,17 @@ def test_purge_moves_the_tscv_training_span_back():
         100,
         hourly_frame(100)["open_time"],
         SplitType.TSCV_EXPANDING,
-        _params(n_folds=4, purge_flag=True, label_horizon_bars=5),
+        _params(n_folds=4, purge_flag=True, label_horizon_bars=5, include_validation=True),
     )
     train = next(s for s in spans if s.fold == 1 and s.role is SplitRole.TRAIN)
     test = next(s for s in spans if s.fold == 1 and s.role is SplitRole.TEST)
-    assert test.start == 20
-    assert train.end == 15
+    val = next(s for s in spans if s.fold == 1 and s.role is SplitRole.VAL)
+    assert val.start == 16
+    assert train.end == 11
+    assert test.start == 32
+    assert val.end == 27
     assert boundaries[0].purge == 5
+    assert boundaries[1].purge == 5
 
 
 def test_purge_with_an_equal_gap_removes_nothing_extra():
@@ -354,12 +362,13 @@ def test_a_nanosecond_free_split_type_is_refused():
 # --------------------------------------------------------------------- service
 
 
-async def test_create_writes_a_plan_in_outputs(settings, catalog):
+async def test_create_writes_plan_to_outputs_and_partitions_to_processed(settings, catalog):
     parent = register(settings, catalog, hourly_frame(200))
     created = await _service(settings, catalog).create(
         SplitCreateRequest(dataset_id=parent.dataset_id, split_type=SplitType.PERCENTAGE_70_15_15)
     )
     assert created.dataset.category is DatasetCategory.OUTPUTS
+    assert "outputs" in created.dataset.storage_path
     assert created.dataset.operation == OPERATION
     assert created.dataset.parent_dataset_id == parent.dataset_id
     assert [row.role for row in created.plan] == [
@@ -369,6 +378,11 @@ async def test_create_writes_a_plan_in_outputs(settings, catalog):
     ]
     assert [row.row_count for row in created.plan] == [140, 30, 30]
     assert all(row.split_id == created.dataset.dataset_id for row in created.plan)
+    assert len(created.partitions) == 3
+    assert {item.category for item in created.partitions} == {DatasetCategory.PROCESSED}
+    assert {item.provenance["split_role"] for item in created.partitions} == {
+        "train", "val", "test",
+    }
 
 
 async def test_create_does_not_touch_the_source_dataset(settings, catalog):
@@ -409,14 +423,15 @@ async def test_report_counts_every_role_and_the_untested_rows(settings, catalog)
         SplitCreateRequest(
             dataset_id=parent.dataset_id,
             split_type=SplitType.TSCV_EXPANDING,
-            parameters=_params(n_folds=4),
+            parameters=_params(n_folds=4, include_validation=True),
         )
     )
     report = created.report
     assert report.rows == 100
     assert report.rows_by_role["train"] > 0
-    assert report.rows_tested == 80
-    assert report.rows_never_tested == 20
+    assert report.rows_by_role["val"] == 64
+    assert report.rows_tested == 68
+    assert report.rows_never_tested == 32
     assert report.folds == 4
 
 
@@ -426,13 +441,14 @@ async def test_report_gives_the_row_boundaries(settings, catalog):
         SplitCreateRequest(
             dataset_id=parent.dataset_id,
             split_type=SplitType.TSCV_EXPANDING,
-            parameters=_params(n_folds=4, gap_size=2),
+            parameters=_params(n_folds=4, gap_size=2, include_validation=True),
         )
     )
     first = created.report.boundaries[0]
-    assert first["cut_index"] == 20
+    assert first["cut_index"] == 16
     assert first["gap_rows_removed"] == 2
-    assert first["effective_end_index"] == 18
+    assert first["effective_end_index"] == 14
+    assert len(created.report.boundaries) == 8
 
 
 async def test_purge_is_reported_when_it_removes_nothing(settings, catalog):
@@ -537,7 +553,7 @@ async def test_an_unparseable_timestamp_is_refused(settings, catalog):
 
 
 async def test_too_few_rows_for_the_fold_count_is_refused(settings, catalog):
-    # 10 folds need 11 blocks of at least 2 bars = 22 rows. The message names the fold
+    # Default 10 folds need 11 blocks of at least 2 bars = 22 rows. The message names the fold
     # count rather than the first span that came out short, because the fold count is the
     # control the user has to change.
     parent = register(settings, catalog, hourly_frame(20), name="tiny")

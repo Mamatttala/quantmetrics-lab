@@ -9,11 +9,8 @@ The result is fetched from ``GET /api/jobs/{job_id}``, which lives in the jobs r
 registry is generic and a second polling endpoint would be a second implementation of one
 lookup.
 
-**The one thing this module will not do.** There is no request shape that fits a scaler on
-the whole series. ``minmax``, ``standard`` and ``robust`` require ``split_plan_id`` at the
-model layer, so a request without one is rejected by pydantic before the handler runs and
-the service could never see it. That is deliberate: a validation rule in the service is one
-refactor away from being bypassed by a new caller, while a required field is not.
+``minmax``, ``standard`` and ``robust`` fit the full selected dataset without a plan,
+or only the training rows when ``split_plan_id`` is supplied. Rolling uses no plan.
 """
 
 from __future__ import annotations
@@ -35,8 +32,8 @@ async def scaling_options(
     """Numeric features, available scalers, and the plans this dataset has.
 
     One call rather than three, because the page cannot render any of them independently:
-    which scalers are available depends on whether a plan exists, and the feature list comes
-    from the frame. Availability is decided here and echoed — the page greys a control with
+    the feature list comes from the frame and saved plans come from the catalog.
+    Availability is decided here and echoed — the page greys a control with
     the reason it is given, so a control presented as available and a refusal from the run
     endpoint cannot disagree.
     """
@@ -52,8 +49,8 @@ async def fit_transform(request: ScalingRequest) -> dict[str, Any]:
     only way to learn whether it succeeded or why it did not.
 
     Refusals the handler makes itself are 404s and 422s raised before any job exists — a
-    dataset that does not exist, or a request that names a scaler which must be fitted
-    without a plan. Everything that can only be discovered after reading the files — a plan
+    dataset that does not exist, or incompatible parameters. Everything that can only
+    be discovered after reading the files — a plan
     belonging to another dataset, a fold outside it, features that are empty within the
     training span — arrives through the job's ``error`` field, because by then there is no
     request left to attach a status to.

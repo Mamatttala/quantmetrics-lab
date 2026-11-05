@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Description } from "@/components/Description";
 
 import { ApiError, api } from "@/api/client";
 import { notifyDatasetsChanged } from "@/api/datasetsChanged";
@@ -243,13 +244,13 @@ export function RawDataFetch() {
           <button type="submit" className="btn" disabled={busy || symbol.trim() === ""}>
             {busy ? "Fetching…" : "Fetch"}
           </button>
-          <span className="muted" style={{ fontSize: 12 }}>
+          <Description className="muted" style={{ fontSize: 12 }}>
             {isCrypto
               ? CRYPTO_TYPES.find((t) => t.value === effectiveCryptoType)?.hint
               : assetClass === "equity_futures"
                 ? "Yahoo serves no settlement price or open interest; those columns are declared and left null."
                 : "Raw Close and Adj Close are both kept."}
-          </span>
+          </Description>
         </div>
       </form>
 

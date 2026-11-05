@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -15,6 +16,7 @@ import type {
 import { SCALER_OPTIONS } from "@/api/types";
 import { HeadTailTable } from "@/components/HeadTailTable";
 import { PageHeader } from "@/components/PageHeader";
+import { DatasetOptions } from "@/components/DatasetOptions";
 
 interface Notice {
   message: string;
@@ -24,34 +26,17 @@ interface Notice {
 /**
  * Scaling (C7).
  *
- * One rule governs this page, and every control on it is shaped by it:
+ * Fitted scalers can use the entire selected dataset or a saved plan's training span.
+ * Plans are loaded from the catalog on entry and refreshed when datasets change.
+ * Rolling z-score uses a trailing window and takes no plan.
  *
- * > **Fit on the training span. Transform everything. Never fit on anything the model will
- * > be scored on.**
- *
- * A scaler fitted on the whole series carries the test span's mean and range into every
- * training row. The model has seen the future before it is trained, and the transformed
- * frame looks entirely normal — the only symptom is a backtest that is too good. So the
- * three fitted scalers (min-max, standard, robust) cannot be *run* without a split plan:
- * the backend refuses the request at the schema, before any work happens. The page does not
- * re-derive that rule — it renders `options.scalers[].available` and the reason attached to
- * it, so a control greyed out here and a refusal from the endpoint cannot disagree.
- *
- * **The rolling z-score is the one member that is different in kind.** It estimates a mean
- * and a standard deviation from the trailing window at each row, so it is causal by
- * construction: nothing is fitted, nothing can leak, and it takes no plan. It is offered
- * even when the dataset has no plan at all.
- *
- * **A walk-forward plan needs a fold.** The plan holds one train/test pair per fold, and
+ * **A walk-forward plan needs a fold.** The plan holds separate spans per fold, and
  * pooling every fold's training rows into one fit would compute fold 1's statistics from
  * rows lying *after* fold 1's test span — look-ahead relative to that fold, and invisible.
  * So the fold control appears exactly when the selected plan is a walk-forward one.
  */
 
-/** Plan/parameter artifacts are not frames to scale: a split plan has no timeline, and a
- *  scaler-parameter table's own columns are the numbers — offering it would invite scaling
- *  `center_` and `scale_`. */
-const ARTIFACT_OPERATIONS = new Set(["split", "scaler_params"]);
+/** Split selections resolve to their source; parameter tables are not observations. */
 
 function isWalkForwardPlan(plan: SplitPlanSummary | undefined): boolean {
   return plan !== undefined && plan.split_type.startsWith("tscv");
@@ -74,6 +59,8 @@ export function ScalingPage() {
     "idle" | "loading" | "ready" | "error"
   >("idle");
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [catalogRevision, setCatalogRevision] = useState(0);
+  const initializedDataset = useRef<string | undefined>(undefined);
 
   const [scaler, setScaler] = useState<ScalerType>("standard");
   const [planId, setPlanId] = useState("");
@@ -98,7 +85,9 @@ export function ScalingPage() {
       const rows = await api.listDatasets();
       setCandidates(
         rows.filter(
-          (row) => row.row_count > 0 && !ARTIFACT_OPERATIONS.has(row.operation ?? ""),
+          (row) => row.row_count > 0 && (
+            row.artifact_kind === "observations" || row.operation === "split"
+          ),
         ),
       );
     } catch {
@@ -111,11 +100,13 @@ export function ScalingPage() {
   }, [loadCandidates]);
 
   useEffect(() => subscribeToDatasets(() => void loadCandidates()), [loadCandidates]);
+  useEffect(() => subscribeToDatasets(() => setCatalogRevision((value) => value + 1)), []);
 
   useEffect(() => {
     if (datasetId === undefined) {
       setOptions(null);
       setOptionsStatus("idle");
+      initializedDataset.current = undefined;
       return;
     }
     let cancelled = false;
@@ -128,12 +119,23 @@ export function ScalingPage() {
         if (cancelled) return;
         setOptions(payload);
         setOptionsStatus("ready");
+        if (initializedDataset.current === datasetId) {
+          setPlanId((current) => current === "" || payload.plans.some(
+            (plan) => plan.split_plan_id === current,
+          ) ? current : "");
+          return;
+        }
+        initializedDataset.current = datasetId;
         // The server's own defaults seed the form, so the first Run is the run the server
         // would have chosen rather than one this page invented.
         setPicked(new Set(payload.defaults.features));
         setScaler(payload.defaults.scaler_type);
         setTrailing(String(payload.defaults.window));
-        setPlanId(payload.plans[0]?.split_plan_id ?? "");
+        setPlanId(
+          payload.defaults.split_plan_id ??
+            payload.plans.find((plan) => plan.split_plan_id === datasetId)?.split_plan_id ??
+            payload.plans[0]?.split_plan_id ?? "",
+        );
         setFold(1);
       })
       .catch((cause: unknown) => {
@@ -145,7 +147,7 @@ export function ScalingPage() {
     return () => {
       cancelled = true;
     };
-  }, [datasetId]);
+  }, [datasetId, catalogRevision]);
 
   useEffect(() => {
     setResult(null);
@@ -162,26 +164,21 @@ export function ScalingPage() {
     [options, scaler],
   );
 
-  const needsPlan = scalerOption?.needs_split_plan ?? true;
+  const supportsPlan = scalerOption?.supports_split_plan ?? scaler !== "rolling_zscore";
 
   const selectedPlan = useMemo(
     () => options?.plans.find((plan) => plan.split_plan_id === planId),
     [options, planId],
   );
 
-  const walkForward = needsPlan && isWalkForwardPlan(selectedPlan);
+  const walkForward = supportsPlan && isWalkForwardPlan(selectedPlan);
 
   const problems = useMemo<string[]>(() => {
     const found: string[] = [];
     if (picked.size === 0) {
       found.push("Tick at least one feature to scale.");
     }
-    if (needsPlan && planId === "") {
-      found.push(
-        `${scaler} is fitted on a stretch of history, so it needs a split plan to say which ` +
-          "rows it may be fitted on. Make one in C6 Chronological Splits first.",
-      );
-    }
+    if (scalerOption?.available === false) found.push(scalerOption.reason ?? "Scaler unavailable.");
     if (walkForward && (fold < 1 || fold > (selectedPlan?.folds ?? 0))) {
       found.push(
         `Pick a fold between 1 and ${selectedPlan?.folds ?? 0}: this is a walk-forward ` +
@@ -189,18 +186,17 @@ export function ScalingPage() {
       );
     }
     if (scaler === "rolling_zscore") {
-      const bars = Number.parseInt(trailing, 10);
-      if (!Number.isFinite(bars) || bars < 2) {
+      const bars = Number(trailing);
+      if (!Number.isInteger(bars) || bars < 2 || bars > 10000) {
         found.push(
-          "The trailing window needs at least two bars. A one-bar window has no dispersion " +
-            "to divide by.",
+          "The trailing window needs a whole number from 2 to 10,000 bars.",
         );
       }
     }
     return found;
-  }, [picked.size, needsPlan, planId, scaler, walkForward, fold, selectedPlan, trailing]);
+  }, [picked.size, scalerOption, scaler, walkForward, fold, selectedPlan, trailing]);
 
-  const canRun = options !== null && problems.length === 0 && !running;
+  const canRun = optionsStatus === "ready" && options !== null && problems.length === 0 && !running;
 
   // -------------------------------------------------------------------- run
 
@@ -218,7 +214,7 @@ export function ScalingPage() {
       const accepted = await api.runScaling({
         dataset_id: options.dataset_id,
         scaler_type: scaler,
-        split_plan_id: needsPlan ? planId : null,
+        split_plan_id: supportsPlan && planId !== "" ? planId : null,
         fold: walkForward ? fold : null,
         // Sent in the options' own order so two identical runs produce identical bytes —
         // which is what makes the stored provenance comparable between them.
@@ -260,11 +256,9 @@ export function ScalingPage() {
         title="Scaling"
         lead={
           <>
-            Rescale feature columns to a comparable range. Every scaler is fitted on the{" "}
-            <strong>training span alone</strong> and applied to every row, so the test span
-            never contributes a mean, a range or a median to the numbers a model is trained
-            on. The frame keeps its rows and its other columns: only the ticked features are
-            replaced.
+            Rescale feature columns using the entire dataset or a saved split plan&apos;s{" "}
+            <strong>training span</strong>. The selected features are transformed on every
+            row. The frame keeps its rows and its other columns.
           </>
         }
       />
@@ -281,26 +275,25 @@ export function ScalingPage() {
             }}
           >
             <option value="">— choose a dataset —</option>
-            {candidates.map((row) => (
-              <option key={row.dataset_id} value={row.dataset_id}>
-                {row.name} · {row.category} · {row.row_count.toLocaleString()} rows
-                {row.timeframe === null ? "" : ` · ${row.timeframe}`}
-              </option>
-            ))}
+            <DatasetOptions datasets={candidates} />
           </select>
-          <p className="field__note">
-            A split plan must already exist for this dataset before min-max, standard or
-            robust can be run — plans and parameter tables are not offered here.
-          </p>
+          <Description className="field__note">
+            Choose a dataset or a saved split. Selecting a split loads its source features
+            and selects that plan. Min-max, standard and robust can fit the entire dataset
+            without splitting. Choose a saved plan to fit only its training rows.
+          </Description>
         </div>
       </div>
 
       {empty && (
         <div className="panel muted">
-          No dataset selected. Scaling writes a new{" "}
-          <span className="mono">processed_data</span> dataset and a separate{" "}
-          <span className="mono">outputs</span> table of the fitted parameters, leaving the
-          input untouched.
+          No dataset selected.
+          <Description anchor=".panel">
+            Scaling writes a new{" "}
+            <span className="mono">processed_data</span> dataset and a separate{" "}
+            <span className="mono">outputs</span> table of the fitted parameters, leaving the
+            input untouched.
+          </Description>
         </div>
       )}
 
@@ -363,13 +356,13 @@ export function ScalingPage() {
 
             <div className="panel">
               <fieldset className="policy" disabled={running}>
-                <legend className="policy__legend">How to rescale the columns</legend>
-                <p className="policy__hint muted">
-                  The three fitted scalers are marked unavailable until a split plan exists.
-                  That is not a limitation to work around: without a plan the only stretch of
-                  history available to fit on is the whole series, which includes the rows
-                  the model will be scored on.
-                </p>
+                <legend className="policy__legend">How to rescale the columns
+                  <Description className="policy__hint muted">
+                    Standard, min-max and robust estimate fixed parameters from your chosen
+                    fit scope. Rolling z-score standardises each row against its trailing window.
+                  </Description>
+                </legend>
+
 
                 {SCALER_OPTIONS.map((option) => {
                   const availability = options.scalers.find(
@@ -395,62 +388,45 @@ export function ScalingPage() {
                       />
                       <span className="policy__body">
                         <span className="policy__label">{option.label}</span>
-                        <span className="policy__detail muted">{option.detail}</span>
+                        <Description className="policy__detail muted">{option.detail}</Description>
                         {option.caution !== undefined && (
-                          <span className="policy__caution">{option.caution}</span>
+                          <Description className="policy__caution">{option.caution}</Description>
                         )}
                         {unavailable && (
-                          <span className="policy__caution">{availability?.reason}</span>
+                          <Description className="policy__caution">{availability?.reason}</Description>
                         )}
                       </span>
                     </label>
                   );
                 })}
 
-                {needsPlan && (
+                {supportsPlan && (
                   <div className="scaling__plan">
                     <div className="field field--tight">
-                      <label htmlFor="scaling-plan">Split plan</label>
-                      {options.plans.length === 0 ? (
-                        <>
-                          <select id="scaling-plan" value="" disabled>
-                            <option value="">— no plan exists for this dataset —</option>
-                          </select>
-                          <p className="field__note">
-                            Make one in{" "}
-                            <Link to={`/splits/${options.dataset_id}`}>
-                              C6 Chronological Splits
-                            </Link>
-                            . Until then only the rolling z-score can run here, because it
-                            is the only scaler that fits nothing.
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <select
-                            id="scaling-plan"
-                            value={planId}
-                            onChange={(event) => {
-                              setPlanId(event.target.value);
-                              setFold(1);
-                            }}
-                            disabled={running}
-                          >
-                            {options.plans.map((plan) => (
-                              <option key={plan.split_plan_id} value={plan.split_plan_id}>
-                                {plan.name} · {plan.split_type} · {plan.folds} fold(s) ·{" "}
-                                {plan.rows.toLocaleString()} span(s)
-                              </option>
-                            ))}
-                          </select>
-                          <p className="field__note">
-                            The parameters are estimated from this plan&apos;s training span
-                            and applied to every row. The plan records the checksum of the
-                            frame it was computed on, so a stale plan is refused rather than
-                            silently applied.
-                          </p>
-                        </>
-                      )}
+                      <label htmlFor="scaling-plan">Fit scope / split plan</label>
+                      <select
+                        id="scaling-plan"
+                        value={planId}
+                        onChange={(event) => {
+                          setPlanId(event.target.value);
+                          setFold(1);
+                        }}
+                        disabled={running}
+                      >
+                        <option value="">Entire dataset (no split plan)</option>
+                        {options.plans.map((plan) => (
+                          <option key={plan.split_plan_id} value={plan.split_plan_id}>
+                            {plan.name} · {plan.split_type} · {plan.folds} fold(s) ·{" "}
+                            {plan.rows.toLocaleString()} span(s)
+                          </option>
+                        ))}
+                      </select>
+                      <Description className="field__note">
+                        Entire dataset estimates parameters from all selected rows.
+                        A saved plan estimates them from training rows only and applies
+                        them to the selected dataset. Use a plan for model evaluation
+                        to keep validation and test statistics out of the fit.
+                      </Description>
                     </div>
 
                     {walkForward && (
@@ -471,13 +447,13 @@ export function ScalingPage() {
                             </option>
                           ))}
                         </select>
-                        <p className="field__note">
-                          A walk-forward plan is a set of train/test pairs, one per fold.
+                        <Description className="field__note">
+                          A walk-forward plan has a training span per fold, with optional validation.
                           Fitting on every fold&apos;s training rows at once would compute
                           the first fold&apos;s statistics from rows lying{" "}
                           <strong>after</strong> its test span — look-ahead relative to that
                           fold, and invisible in the resulting frame.
-                        </p>
+                        </Description>
                       </div>
                     )}
                   </div>
@@ -494,7 +470,7 @@ export function ScalingPage() {
                       onChange={(event) => setTrailing(event.target.value)}
                       disabled={running}
                     />
-                    <p className="field__note">
+                    <Description className="field__note">
                       Each row is standardised against the mean and standard deviation of
                       the <em>preceding</em> {trailing || "0"} bars, so its value never
                       depends on a row after it. The first {Math.max(
@@ -503,7 +479,7 @@ export function ScalingPage() {
                       )}{" "}
                       rows are left empty — there is no window behind them yet, and null is
                       the honest value.
-                    </p>
+                    </Description>
                   </div>
                 )}
               </fieldset>
@@ -530,10 +506,10 @@ export function ScalingPage() {
                     </label>
                   ))}
                 </div>
-                <p className="field__note">
+                <Description className="field__note">
                   Only these columns are replaced. Every other column — including the
                   timestamp — is carried through unchanged, and no row is added or removed.
-                </p>
+                </Description>
               </div>
 
               <div className="field">
@@ -541,7 +517,7 @@ export function ScalingPage() {
                 <input
                   id="scaling-name"
                   type="text"
-                  placeholder="(defaults to the source name plus the scaler)"
+                  placeholder="leave blank for the standard generated name"
                   value={outName}
                   onChange={(event) => setOutName(event.target.value)}
                   disabled={running}
@@ -571,7 +547,7 @@ export function ScalingPage() {
                 <span className="actions__spacer" />
                 <span className="mono muted" style={{ fontSize: 11 }}>
                   {scaler}
-                  {needsPlan && planId !== "" ? ` · ${planId}` : ""}
+                  {supportsPlan ? ` · ${planId || "entire dataset"}` : ""}
                   {walkForward ? ` · fold ${fold}` : ""}
                 </span>
               </div>
@@ -585,13 +561,13 @@ export function ScalingPage() {
                 </div>
               )}
 
-              <div className="panel muted" style={{ fontSize: 12 }}>
+              <Description className="panel muted" style={{ fontSize: 12 }}>
                 Stopping the wait does not stop the job — it is running on the server and
                 still lands in the job registry. Both artifacts are stored: the scaled frame
                 in <strong>processed_data</strong> and the fitted parameters in{" "}
                 <strong>outputs</strong>, so a prediction can be inverted later without the
                 original being to hand.
-              </div>
+              </Description>
             </div>
           </div>
 
@@ -614,12 +590,20 @@ export function ScalingPage() {
                   <div className="report__row">
                     <span className="report__key">Fitted on</span>
                     <span className="report__value">
-                      {payload.report.fit_role ?? "—"}
+                      {payload.report.fit_role === "full_dataset"
+                        ? "Entire dataset"
+                        : payload.report.fit_role === "train"
+                          ? "Training rows"
+                          : payload.report.fit_role ?? "—"}
                       {payload.report.split_plan_name !== null
                         ? ` — ${payload.report.split_plan_name}`
                         : ""}
                       {payload.report.fold !== null ? ` · fold ${payload.report.fold}` : ""}
                     </span>
+                  </div>
+                  <div className="report__row">
+                    <span className="report__key">Fit source</span>
+                    <span className="report__value">{payload.report.fit_dataset_name}</span>
                   </div>
                   <div className="report__row">
                     <span className="report__key">Fit span</span>
@@ -631,13 +615,7 @@ export function ScalingPage() {
                   <div className="report__row">
                     <span className="report__key">Rows fitted on</span>
                     <span className="report__value mono">
-                      {payload.report.rows_used_for_fit.toLocaleString()} of{" "}
-                      {payload.report.rows.toLocaleString()}
-                      {payload.report.fit_rows > payload.report.rows_used_for_fit
-                        ? ` — ${(
-                            payload.report.fit_rows - payload.report.rows_used_for_fit
-                          ).toLocaleString()} row(s) in the span carry an empty value for at least one feature`
-                        : ""}
+                      {payload.report.rows_used_for_fit.toLocaleString()}
                     </span>
                   </div>
                   {payload.report.window !== null && (
@@ -651,7 +629,11 @@ export function ScalingPage() {
                   <div className="report__row">
                     <span className="report__key">Plan</span>
                     <span className="report__value mono" style={{ fontSize: 11 }}>
-                      {payload.report.split_plan_id ?? "none — nothing was fitted"}
+                      {payload.report.split_plan_id ?? (
+                        payload.report.scaler_type === "rolling_zscore"
+                          ? "none — trailing window"
+                          : "none — entire dataset"
+                      )}
                     </span>
                   </div>
                 </div>
@@ -692,13 +674,13 @@ export function ScalingPage() {
                     ))}
                   </tbody>
                 </table>
-                <p className="field__note">
+                <Description className="field__note">
                   Every fitted scaler reduces to this one affine pair, so{" "}
                   <span className="mono">x = scaled · scale_ + center_</span> inverts
                   min-max, standard and robust alike — a prediction can be returned to price
                   units without knowing which one produced it. The raw library attributes
                   are stored beside it in the parameters dataset.
-                </p>
+                </Description>
 
                 {payload.report.warnings.length > 0 && (
                   <div className="result__bar" style={{ marginTop: 12, marginBottom: 0 }}>
@@ -761,7 +743,7 @@ export function ScalingPage() {
                     className="btn btn--ghost btn--sm"
                     onClick={() =>
                       window.open(
-                        `/api/datasets/${payload.params_dataset?.dataset_id}/export?format=json`,
+                        api.datasetExportUrl(payload.params_dataset!.dataset_id, "json"),
                       )
                     }
                   >

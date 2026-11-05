@@ -9,7 +9,7 @@ The spec enumerates these fields:
 All fourteen are modelled here as required-or-explicitly-null. Three fields are
 additions, noted in DECISIONS.md:
 
-* ``category``          — the Data Explorer's four buckets; the spec describes the
+* ``category``          — the Data Explorer's buckets; the spec describes the
                           grouping in prose but does not name a field for it.
 * ``unpopulated_fields``— columns that exist in the schema but are known-empty
                           (e.g. equity-futures settlement), so the UI can badge
@@ -25,6 +25,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.models.enums import AssetClass, DatasetCategory, Provider, Timeframe
+from app.models.naming import artifact_kind, origin_page
 
 
 class ColumnMeta(BaseModel):
@@ -78,14 +79,23 @@ class DatasetMeta(BaseModel):
 
         Read out of the provenance rather than stored twice, because `persist_dataset`
         already writes it there for every derived dataset and a second column could drift
-        from it. It is lifted onto the model because callers have to *branch* on it — C6
-        and C7 hide split-plan tables from their own dataset pickers, and a plan is
-        otherwise indistinguishable from a frame of bars in a list.
+        from it. Callers branch on it: C6 excludes plans from its source picker,
+        while downstream selectors resolve plans to their source observations.
 
         `None` for a dataset that was fetched or uploaded rather than derived: it is not
         the product of an operation inside this application.
         """
         return self.provenance.get("operation") or None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def artifact_kind(self) -> str:
+        return artifact_kind(self.operation, self.category)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def origin_page(self) -> str | None:
+        return origin_page(self.operation, self.category)
 
 
 class DatasetSummary(BaseModel):
@@ -110,3 +120,5 @@ class DatasetSummary(BaseModel):
     #: reason as on `DatasetMeta`. Named here rather than inherited from it because this
     #: model is the explorer's projection and carries no provenance to read it from.
     operation: str | None = None
+    artifact_kind: str = "observations"
+    origin_page: str | None = None

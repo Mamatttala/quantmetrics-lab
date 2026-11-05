@@ -28,7 +28,7 @@ body {
 }
 
 ::selection {
-  background: rgba(212, 168, 67, 0.3);
+  background: var(--selection-bg);
   color: var(--text);
 }
 
@@ -68,7 +68,7 @@ a {
 /* ----------------------------------------------------------------- focus ring */
 
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
@@ -131,7 +131,7 @@ a {
 }
 
 .btn--ghost:active:not(:disabled) {
-  background: rgba(212, 168, 67, 0.2);
+  background: var(--accent-active-bg);
 }
 
 /* Small actions (grid paging, chart zoom, …). Kept shorter than the primary
@@ -163,13 +163,13 @@ a {
   min-height: 0;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--danger);
+  color: var(--color-danger);
   padding: 4px 8px;
   font-weight: 600;
 }
 
 .btn--danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.12);
+  background: var(--danger-hover);
   transform: none;
 }
 
@@ -216,7 +216,7 @@ select:focus,
 textarea:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgba(212, 168, 67, 0.2);
+  box-shadow: 0 0 0 2px var(--focus-halo);
 }
 
 input::placeholder {
@@ -240,8 +240,8 @@ select {
   -webkit-appearance: none;
   padding-right: 30px;
   background-image:
-    linear-gradient(45deg, transparent 50%, var(--accent-dim) 50%),
-    linear-gradient(135deg, var(--accent-dim) 50%, transparent 50%);
+    linear-gradient(45deg, transparent 50%, var(--select-arrow) 50%),
+    linear-gradient(135deg, var(--select-arrow) 50%, transparent 50%);
   background-repeat: no-repeat;
   background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
   background-size: 5px 5px, 5px 5px;
@@ -249,7 +249,7 @@ select {
 
 /* Inline SVG select arrows use the same token as the native select chevron. */
 .select-arrow {
-  stroke: var(--accent-dim);
+  stroke: var(--select-arrow);
 }
 
 /* Checkboxes: custom 14px box with a gold fill and dark check when on (§4.2). */
@@ -280,7 +280,7 @@ input[type="checkbox"]:checked::after {
   top: 1px;
   width: 4px;
   height: 8px;
-  border: solid #ffffff;
+  border: solid var(--checkbox-check);
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
@@ -385,7 +385,8 @@ input[type="range"]::-moz-range-track {
 
 .page {
   padding: 22px 26px 60px;
-  max-width: 1400px;
+  width: 100%;
+  min-width: 0;
 }
 
 .page__title {
@@ -395,6 +396,80 @@ input[type="range"]::-moz-range-track {
   color: var(--text);
   letter-spacing: -0.01em;
 }
+
+/* Descriptions are available from their item without adding height to the page. */
+.page > header { margin-bottom: 20px; }
+.description-source { display: none !important; }
+.description-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.description-control--hidden { display: none; }
+
+.description-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--control);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--control);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: normal;
+  line-height: 1;
+  text-transform: none;
+  cursor: pointer;
+  user-select: none;
+}
+.description-toggle:hover,
+.description-toggle[aria-expanded="true"] {
+  background: var(--control);
+  color: var(--on-accent);
+}
+
+.field:has(> .description-control) { position: relative; }
+.field:has(> .description-control) > label { padding-right: 30px; }
+.field > .description-control { position: absolute; top: 0; right: 0; }
+
+.section:has(> .description-control),
+.section:has(> .panel > .description-control) { position: relative; }
+.section:has(> .description-control) > .section__head,
+.section:has(> .panel > .description-control) > .section__head { padding-right: 52px; }
+.section > .description-control,
+.section > .panel > .description-control { position: absolute; top: 12px; right: 16px; }
+
+.description-popup {
+  position: fixed;
+  z-index: 10000;
+  width: max-content;
+  max-width: min(440px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 12px 14px;
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius);
+  background: var(--bg-input);
+  box-shadow: var(--tooltip-shadow);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.6;
+}
+
+.description-popup__part + .description-popup__part { margin-top: 8px; }
+.description-popup .infotip__formula,
+.description-popup .infotip__detail,
+.description-popup .infotip__caution,
+.description-popup .infotip__meta { display: block; }
 
 .page__lead {
   margin: 0 0 24px;
@@ -438,13 +513,13 @@ input[type="range"]::-moz-range-track {
 }
 
 .result__bar--ok {
-  border-color: rgba(74, 222, 128, 0.5);
+  border-color: var(--success-border);
   color: var(--ok);
 }
 
 .result__bar--error {
-  border-color: rgba(239, 68, 68, 0.55);
-  color: var(--danger);
+  border-color: var(--danger-border);
+  color: var(--color-danger);
 }
 
 /* ------------------------------------------------------------------ utilities */
@@ -467,7 +542,7 @@ input[type="range"]::-moz-range-track {
 }
 
 .field {
-  min-width: 150px;
+  min-width: min(150px, 100%);
   flex: 1 1 150px;
 }
 /* ---------------------------------------------------- modals / dialogs (§ micro-UI)

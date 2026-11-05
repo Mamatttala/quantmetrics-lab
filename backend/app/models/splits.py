@@ -66,6 +66,13 @@ class SplitParameters(BaseModel):
     #: Walk-forward configuration. `n_folds` bounds match the specification's slider.
     n_folds: int = Field(default=5, ge=2, le=10)
 
+    #: Opt in to a separate validation block in each walk-forward fold.
+    include_validation: bool = False
+
+    @property
+    def walk_forward_blocks(self) -> int:
+        return self.n_folds + (2 if self.include_validation else 1)
+
     #: Bars dropped between one span's end and the next span's start — the *embargo*. It
     #: exists because a feature computed over a trailing window at the end of the training
     #: span still sees bars that overlap the beginning of the test span.
@@ -107,12 +114,14 @@ class SplitCreateRequest(BaseModel):
     split_type: SplitType
     parameters: SplitParameters = Field(default_factory=SplitParameters)
 
-    #: Optional name for the stored plan. Defaults to the source name plus the split type.
+    #: Optional display name. Blank uses the shared source__operation__id convention.
     name: str | None = None
 
     @model_validator(mode="after")
     def _check(self) -> SplitCreateRequest:
         params = self.parameters
+        if params.include_validation and not self.split_type.is_tscv:
+            raise ValueError("include_validation applies only to walk-forward splits.")
         needed = _REQUIRED_DATES[self.split_type]
         missing = [key for key in needed if getattr(params, key) is None]
         if missing:
@@ -243,6 +252,7 @@ class SplitPlanCreated(BaseModel):
     dataset: DatasetMeta
     plan: list[SplitPlanRow]
     report: SplitReport
+    partitions: list[DatasetMeta] = Field(default_factory=list)
 
 
 class SplitPlanSummary(BaseModel):

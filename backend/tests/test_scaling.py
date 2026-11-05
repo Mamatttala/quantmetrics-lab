@@ -13,8 +13,8 @@ coincidental.
 over a truncated copy, and the shared prefix must match exactly. Any leak through a centred
 window or a forward-looking statistic shows up as a difference in the first 80%.
 
-**Round trips and refusals.** Every scaler must invert exactly, and every request that would
-fit on too much data must raise rather than produce a plausible frame.
+**Round trips and fit scope.** Every scaler must invert exactly. Fitted scalers also support
+the entire dataset, and incompatible or stale split plans must raise.
 """
 
 from __future__ import annotations
@@ -631,17 +631,15 @@ async def test_a_preview_run_writes_nothing(settings, catalog):
 # ------------------------------------------------------------- refusals
 
 
-def test_a_fitted_scaler_without_a_split_plan_is_refused():
-    """The specification's guardrail, enforced in the type system.
+@pytest.mark.parametrize("scaler", [ScalerType.MINMAX, ScalerType.STANDARD, ScalerType.ROBUST])
+def test_a_fitted_scaler_can_be_requested_without_a_split_plan(scaler):
+    request = ScalingRequest(dataset_id="x", scaler_type=scaler, features=["close"])
+    assert request.split_plan_id is None
 
-    Not merely checked in the service: a required field cannot be bypassed by a new caller,
-    which is what makes this a property of the module rather than a rule the current
-    implementation happens to follow.
-    """
-    with pytest.raises(ValueError, match="needs split_plan_id"):
-        ScalingRequest(
-            dataset_id="x", scaler_type=ScalerType.MINMAX, features=["close"]
-        )
+
+def test_a_fold_without_a_split_plan_is_refused():
+    with pytest.raises(ValueError, match="fold requires"):
+        ScalingRequest(dataset_id="x", scaler_type=ScalerType.STANDARD, fold=1)
 
 
 def test_the_rolling_zscore_refuses_a_split_plan():
@@ -663,27 +661,33 @@ def test_a_window_on_a_fitted_scaler_is_refused():
         )
 
 
-async def test_a_fitted_scaler_without_a_plan_never_reaches_the_fitter(settings, catalog):
-    """The service refuses independently of the request model.
-
-    ``ScalingRequest`` already makes ``split_plan_id`` mandatory for a fitted scaler, so
-    this path is unreachable over HTTP. It is asserted anyway, because the model is the
-    outer ring: a future caller that builds a request by another route (an internal job, a
-    script) must still hit a wall rather than silently fitting on the whole frame.
-    """
-    parent = register(settings, catalog, hourly_frame(200))
-    smuggled = ScalingRequest.model_construct(
+@pytest.mark.parametrize("scaler", [ScalerType.MINMAX, ScalerType.STANDARD, ScalerType.ROBUST])
+async def test_without_a_plan_fits_and_transforms_the_entire_dataset(settings, catalog, scaler):
+    frame = hourly_frame(200)
+    frame["close"] = np.linspace(10.0, 90.0, len(frame))
+    parent = register(settings, catalog, frame)
+    request = ScalingRequest(
         dataset_id=parent.dataset_id,
-        scaler_type=ScalerType.STANDARD,
-        split_plan_id=None,
-        fold=None,
+        scaler_type=scaler,
         features=["close"],
-        window=None,
-        write=False,
-        name=None,
     )
-    with pytest.raises(ValidationFailure, match="needs a split plan"):
-        await _run(settings, catalog).run(smuggled)
+    result = await _run(settings, catalog).run(request)
+    values = frame["close"]
+    center, spread = {
+        ScalerType.STANDARD: (values.mean(), values.std(ddof=0)),
+        ScalerType.MINMAX: (values.min(), values.max() - values.min()),
+        ScalerType.ROBUST: (values.median(), values.quantile(.75) - values.quantile(.25)),
+    }[scaler]
+    scaled = pd.read_parquet(result.dataset.storage_path)
+    np.testing.assert_allclose(scaled["close"], (values - center) / spread)
+    pd.testing.assert_frame_equal(scaled.drop(columns="close"), frame.drop(columns="close"))
+    assert result.report.fit_rows == len(frame)
+    assert result.report.fit_role == "full_dataset"
+    assert result.report.split_plan_id is None
+    assert result.parameters[0].center_ == pytest.approx(center)
+    assert result.parameters[0].fitted_rows == len(frame)
+    assert result.dataset.provenance["scaler_fit_role"] == "full_dataset"
+    assert result.params_dataset is not None
 
 
 async def test_a_plan_for_another_dataset_is_refused(settings, catalog):
@@ -852,12 +856,15 @@ async def test_options_lists_numeric_features_and_plans(settings, catalog):
     assert options["defaults"]["window"] == 60
 
 
-async def test_options_greys_the_fitted_scalers_without_a_plan(settings, catalog):
+async def test_options_offers_all_scalers_without_a_plan(settings, catalog):
     parent = register(settings, catalog, hourly_frame(200))
     options = await _run(settings, catalog).options(parent.dataset_id)
     by_id = {s["id"]: s for s in options["scalers"]}
-    assert by_id["minmax"]["available"] is False
-    assert "whole series" in by_id["minmax"]["reason"]
+    assert all(option["available"] for option in by_id.values())
+    assert by_id["minmax"]["reason"] is None
+    assert by_id["minmax"]["supports_split_plan"] is True
+    assert options["defaults"]["split_plan_id"] is None
+    assert not any(w["code"] == "no_split_plan" for w in options["warnings"])
     assert by_id["rolling_zscore"]["available"] is True
     assert by_id["rolling_zscore"]["needs_split_plan"] is False
 

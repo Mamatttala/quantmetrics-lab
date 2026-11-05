@@ -15,6 +15,7 @@ the parser, never through the filter.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta, timezone
 
 import pandas as pd
@@ -23,6 +24,109 @@ import pytest
 from app.core.errors import UpstreamError, ValidationFailure
 from app.models.enums import Timeframe
 from app.services import binance_fetch
+
+
+@pytest.fixture
+def daily_metrics(monkeypatch):
+    """Serve two five-minute observations for every requested UTC day."""
+    state = {"urls": [], "active": 0, "peak": 0}
+
+    async def download(client, url, *, columns=None):
+        state["urls"].append(url)
+        state["active"] += 1
+        state["peak"] = max(state["peak"], state["active"])
+        await asyncio.sleep(0)
+        state["active"] -= 1
+        day = url.removesuffix(".zip")[-10:]
+        return pd.DataFrame({
+            "create_time": [f"{day} 00:00:00", f"{day} 00:05:00"],
+            "symbol": ["BTCUSDT", "BTCUSDT"],
+            "sum_open_interest": [1000, 1001],
+            "count_long_short_ratio": [1.5, 1.6],
+            "sum_taker_long_short_vol_ratio": [1.0, 1.1],
+        })
+
+    monkeypatch.setattr(binance_fetch, "_download_zip_csv", download)
+    return state
+
+
+@pytest.mark.parametrize("timeframe,rows", [(Timeframe.M5, 2010), (Timeframe.H1, 1005)])
+async def test_metrics_downloads_1005_days_at_requested_resolution(daily_metrics, timeframe, rows):
+    start = datetime(2022, 1, 1, tzinfo=UTC)
+    end = start + timedelta(days=1005) - timedelta(seconds=1)
+    frame = await binance_fetch.fetch_metrics("BTC", start, end, timeframe)
+    assert len(frame) == rows
+    assert len(daily_metrics["urls"]) == 1005
+    assert len(set(daily_metrics["urls"])) == 1005
+    assert all("/daily/metrics/" in url for url in daily_metrics["urls"])
+    assert daily_metrics["peak"] <= binance_fetch._DUMP_CONCURRENCY
+    assert frame["create_time"].min() == pd.Timestamp(start)
+    assert frame["create_time"].max().date() == end.date()
+    assert frame["create_time"].is_monotonic_increasing
+    assert not frame["create_time"].duplicated().any()
+    if timeframe == Timeframe.H1:
+        assert (frame["sum_open_interest"] == 1001).all()
+
+
+def test_metrics_endpoint_stores_a_multi_year_dataset(tmp_path, monkeypatch, daily_metrics):
+    from fastapi.testclient import TestClient
+
+    from app.config import get_settings
+    from app.main import create_app
+
+    monkeypatch.setenv("QML_DATA_DIR", str(tmp_path / "fetch-api"))
+    get_settings.cache_clear()
+    start = datetime(2022, 1, 1, tzinfo=UTC)
+    end = start + timedelta(days=1005) - timedelta(seconds=1)
+    try:
+        with TestClient(create_app()) as client:
+            response = client.post("/api/fetch/binance/metrics", json={
+                "symbol": "BTC", "timeframe": "1h",
+                "start": start.isoformat(), "end": end.isoformat(),
+            })
+            assert response.status_code == 201, response.text
+            dataset = response.json()["dataset"]
+            assert dataset["row_count"] == 1005
+            assert dataset["timeframe"] == "1h"
+            preview = client.get(f"/api/datasets/{dataset['dataset_id']}/preview").json()
+            assert preview["row_count"] == 1005
+            assert preview["head"][0]["sum_open_interest"] == 1001
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_a_failed_daily_file_still_refuses_to_store_partial_metrics(monkeypatch):
+    async def download(client, url, *, columns=None):
+        if "2024-01-02" in url:
+            raise UpstreamError("CDN timeout")
+        return metrics_dump(60)
+
+    monkeypatch.setattr(binance_fetch, "_download_zip_csv", download)
+    with pytest.raises(UpstreamError, match="1 of 3 metrics dump"):
+        await binance_fetch.fetch_metrics(
+            "BTC", datetime(2024, 1, 1), datetime(2024, 1, 3), Timeframe.H1,
+        )
+
+
+async def test_funding_fills_a_missing_month_even_when_earlier_months_exist(monkeypatch):
+    urls = []
+
+    async def download(client, url, *, columns=None):
+        urls.append(url)
+        if "/monthly/" in url:
+            return funding_dump(1) if "2024-01.zip" in url else None
+        day = url.removesuffix(".zip")[-10:]
+        return funding_dump(1, start=f"{day}T00:00:00Z")
+
+    monkeypatch.setattr(binance_fetch, "_download_zip_csv", download)
+    frame = await binance_fetch.fetch_funding(
+        "BTC", datetime(2024, 1, 1), datetime(2024, 2, 2, 23, 59, 59),
+    )
+    assert list(frame["calc_time"].dt.strftime("%Y-%m-%d")) == [
+        "2024-01-01", "2024-02-01", "2024-02-02",
+    ]
+    assert len(urls) == 4
+    assert all("2024-02" in url for url in urls if "/daily/" in url)
 
 
 def funding_dump(hours: int = 12, *, start: str = "2024-01-01T00:00:00Z") -> pd.DataFrame:

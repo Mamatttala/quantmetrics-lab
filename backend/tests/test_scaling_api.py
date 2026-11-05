@@ -9,9 +9,9 @@ a whole Parquet file and writes a whole one; a 200 here would mean the request w
 the availability it reports is the same rule the service refuses on — so a control the page
 greys out cannot disagree with a run the backend rejects.
 
-**The guardrail.** A fitted scaler without a split plan is refused. It is refused twice, and
-both are asserted: at the schema (422, before the handler runs) and, for a caller that
-builds a request some other way, in the service. The schema check is the one the page hits.
+**Fit scope.** Fitted scalers support entire-dataset transforms without splitting. A saved
+plan restricts fitting to training rows; rolling rejects a plan and fitted scalers reject
+rolling-only parameters.
 
 These go through the real app because the frontend's types are hand-written — a renamed JSON
 field would surface in the browser as `undefined`, not as a compile error.
@@ -27,7 +27,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.test_regime_api import register
+from tests.helpers import register
 
 
 @pytest.fixture
@@ -189,29 +189,15 @@ def test_the_rolling_window_is_echoed_back(client: TestClient, dataset_id: str) 
 # ------------------------------------------------------------- the guardrail
 
 
-def test_minmax_without_a_split_plan_is_a_422(client: TestClient, dataset_id: str) -> None:
-    """The specification's first guardrail, asserted at the schema.
-
-    A 422 rather than the specification's 400: `app/core/errors.py` maps nothing to 400, and
-    DECISIONS §57 corrected five driver assertions from 400 to 422 for the same reason. What
-    matters is that the request is refused before any work happens, not which of the two
-    client-error codes carries the refusal.
-    """
-    response = client.post(
-        "/api/scaling/fit_transform",
-        json={"dataset_id": dataset_id, "scaler_type": "minmax", "features": ["close"]},
-    )
-    assert response.status_code == 422
-    assert "split_plan_id" in response.text
-
-
-def test_every_fitted_scaler_is_refused_without_a_plan(client: TestClient, dataset_id: str) -> None:
-    for scaler in ("minmax", "standard", "robust"):
-        response = client.post(
-            "/api/scaling/fit_transform",
-            json={"dataset_id": dataset_id, "scaler_type": scaler, "features": ["close"]},
-        )
-        assert response.status_code == 422, scaler
+@pytest.mark.parametrize("scaler", ["minmax", "standard", "robust"])
+def test_every_fitted_scaler_runs_without_a_plan(client: TestClient, dataset_id: str, scaler: str):
+    record = run_job(client, {
+        "dataset_id": dataset_id, "scaler_type": scaler, "features": ["close"],
+    })
+    assert record["status"] == "succeeded"
+    assert record["result"]["report"]["fit_role"] == "full_dataset"
+    assert record["result"]["report"]["fit_rows"] == 200
+    assert record["result"]["report"]["split_plan_id"] is None
 
 
 def test_a_rolling_run_refuses_a_plan(client: TestClient, dataset_id: str, plan_id: str) -> None:
@@ -302,16 +288,15 @@ def test_options_answers_the_whole_page_in_one_call(client: TestClient, dataset_
     assert body["defaults"]["window"] == 60
 
 
-def test_options_offers_the_rolling_scaler_but_not_the_fitted_ones(
+def test_options_offers_all_scalers_without_splitting(
     client: TestClient, dataset_id: str
 ) -> None:
     body = client.get("/api/scaling/options", params={"dataset_id": dataset_id}).json()
     by_id = {entry["id"]: entry for entry in body["scalers"]}
     assert by_id["rolling_zscore"]["available"] is True
-    assert by_id["minmax"]["available"] is False
-    assert by_id["standard"]["available"] is False
-    assert by_id["robust"]["available"] is False
-    assert "C6" in by_id["standard"]["reason"]
+    assert all(entry["available"] for entry in by_id.values())
+    assert all(not entry["needs_split_plan"] for entry in by_id.values())
+    assert by_id["standard"]["supports_split_plan"] is True
 
 
 def test_options_offers_the_fitted_scalers_once_a_plan_exists(

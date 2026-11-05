@@ -14,6 +14,8 @@ than from the service's return value.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -326,9 +328,7 @@ async def test_scaling_leaves_both_of_its_inputs_untouched(
         settings.data_dir, DatasetCategory.RAW, parent.dataset_id
     )
     plan = await _planned(splits, parent)
-    plan_path = parquet_store.dataset_path(
-        settings.data_dir, DatasetCategory.OUTPUTS, plan.dataset.dataset_id
-    )
+    plan_path = Path(plan.dataset.storage_path)
     plan_before = parquet_store.verify_checksum(plan_path)
 
     result = await scaling.run(

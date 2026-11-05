@@ -14,6 +14,7 @@
  */
 
 .section {
+  min-width: 0;
   margin: 0 0 16px;
   background: var(--card);
   border: 1px solid var(--border);
@@ -23,6 +24,7 @@
 
 .section__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   margin: -20px -20px 12px;
@@ -71,6 +73,7 @@
 }
 
 .panel {
+  min-width: 0;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -88,7 +91,7 @@
 
 .meta {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
   gap: 10px 18px;
 }
 
@@ -131,7 +134,7 @@
 }
 
 .badge--ok {
-  border-color: rgba(74, 222, 128, 0.5);
+  border-color: var(--success-border);
   color: var(--ok);
 }
 
@@ -318,11 +321,11 @@
 }
 
 .ctxmenu__item--danger {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .ctxmenu__item--danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.14);
+  background: var(--danger-menu-hover);
 }
 
 .ctxmenu__sep {
@@ -343,6 +346,16 @@
 
 .actions__spacer {
   flex: 1 1 auto;
+}
+
+.edit-grid__action {
+  flex: 0 0 auto;
+  width: min(180px, 100%);
+  height: 44px;
+  padding: 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
 }
 
 /* ------------------------------------------------------------- chart viewer */
@@ -443,6 +456,7 @@
  */
 
 .policy {
+  min-width: 0;
   margin: 0;
   padding: 12px 14px 14px;
   border: 1px solid var(--border);
@@ -495,10 +509,29 @@
   flex: 0 0 auto;
 }
 
+/* Cleaning choices run left to right; dependent settings occupy the next row. */
+.page--cleaning .policy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.page--cleaning .policy > .policy__option {
+  max-width: 100%;
+  margin: 0;
+}
+
+.page--cleaning .policy > .policy__aside {
+  flex-basis: 100%;
+  min-width: 0;
+  margin: 8px 0 0;
+}
+
 .policy__body {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
 }
 
@@ -618,7 +651,7 @@
 
 .join__options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -701,162 +734,149 @@
 
 /* ============================================================ C5 · Features ==== */
 
-/* One catalogue group. The rows are a table without being a <table>: each row holds a
- * variable number of controls, and a grid would force a column count on rows that do
- * not have one. */
+/* Compact category headers and consistently aligned feature cards. */
 .feature__group {
-  margin-bottom: 4px;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: 8px;
 }
 
-.feature__count {
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
+.feature__group:last-child { margin-bottom: 0; }
+.feature__group > .section__head {
+  margin: -14px -14px 12px;
+  padding: 9px 14px;
+  gap: 8px;
 }
+.feature__group.section--collapsed > .section__head { margin-bottom: -14px; }
+.feature__group .section__title { font-size: 13px; }
+.feature__group > .section__head .btn { min-height: 28px; padding: 4px 10px; }
+.feature__count { font-size: 11px; font-variant-numeric: tabular-nums; }
 
-/* Feature cards: a four-column grid of dark rectangular buttons, per the design
- * spec. `minmax(300px, 1fr)` yields four columns on a wide content area and folds
- * to fewer on a narrow window instead of crushing the labels. */
 .feature {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
-  margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+  align-items: start;
+  gap: 10px;
 }
 
 .feature__row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 10px;
-  padding: 10px 12px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-grid);
-  border-radius: 6px;
-}
-
-.feature__row:hover {
-  background: var(--feature-hover);
-}
-
-/* Disabled is a colour change and not `opacity`: the reason printed below is the
- * point of the row, and dimming it to the point of illegibility would hide the only
- * thing that explains the state. */
-.feature__row--off {
-  background: var(--feature-off);
-}
-
-.feature__row--off .feature__label {
-  color: var(--muted);
-}
-
-.feature__pick {
-  display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   min-width: 0;
+  padding: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-grid);
+  border-radius: 8px;
+  transition: border-color var(--transition), background var(--transition);
+}
+.feature__row:hover { border-color: var(--border-input); background: var(--feature-hover); }
+.feature__row--selected { border-color: var(--control); background: var(--raised-2); }
+.feature__row--selected:hover { border-color: var(--control); }
+.feature__row--off { background: var(--feature-off); }
+.feature__row--off .feature__label { color: var(--muted); }
+
+.feature__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 22px;
+}
+.feature__header > .description-control { margin-left: 0; }
+.feature__pick {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
   flex: 1 1 auto;
   cursor: pointer;
 }
-
 .feature__pick input[type="checkbox"] {
   accent-color: var(--control);
   width: 14px;
   height: 14px;
+  margin: 3px 0 0;
   flex: 0 0 auto;
 }
-
-.feature__row--off .feature__pick {
-  cursor: not-allowed;
+.feature__row--off .feature__pick { cursor: not-allowed; }
+.feature__label { font: 600 13px/1.5 var(--font-ui); color: var(--text); overflow-wrap: anywhere; }
+.feature__meta-label { font-size: 10px; font-weight: 500; color: var(--muted); }
+.feature__output {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
 }
-
-.feature__label {
-  font-family: var(--font-code);
-  font-size: 13px;
-  color: var(--text-code);
-}
-
-.feature__produces {
-  font-size: 11px;
-  margin-left: auto;
-}
-
-.feature__reason {
-  flex-basis: 100%;
-  font-size: 11px;
-  line-height: 1.45;
-  color: var(--warn);
-  padding-left: 21px;
-}
-
+.feature__produces { font-size: 10.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .feature__windows {
-  flex-basis: 100%;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  padding-left: 21px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 7px;
+  padding-top: 9px;
+  margin-top: auto;
+  border-top: 1px solid var(--border);
 }
-
+.feature__presets,
+.feature__custom-values { display: flex; flex-wrap: wrap; gap: 6px; }
 .feature__tick {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11.5px;
+  gap: 5px;
+  min-height: 26px;
+  margin: 0;
+  padding: 4px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 16px;
   color: var(--text);
   cursor: pointer;
 }
-
-.feature__tick input[type="checkbox"] {
-  accent-color: var(--control);
-  width: 13px;
-  height: 13px;
+.feature__tick:hover:not(.feature__tick--off) { border-color: var(--control); }
+.feature__tick:has(input:checked) { border-color: var(--control); background: var(--raised); }
+.feature__tick input[type="checkbox"] { accent-color: var(--control); width: 12px; height: 12px; margin: 0; }
+.feature__tick--off { color: var(--muted); cursor: not-allowed; }
+.feature__bars { font-size: 10px; }
+.feature__custom { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.feature__custom input.feature__input {
+  flex: 0 1 76px;
+  width: 76px;
+  min-width: 0;
+  height: 28px;
+  padding: 4px 7px;
+  font-size: 11px;
+  border-radius: 5px;
 }
-
-.feature__tick--off {
-  color: var(--muted);
-  cursor: not-allowed;
+.feature__custom .feature__add {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 28px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1;
 }
-
-.feature__bars {
-  font-size: 10.5px;
-}
-
-.feature__custom {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.feature__input {
-  width: 72px;
-  padding: 3px 6px;
-  font-size: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-}
-
-.feature__input:focus {
-  outline: 1px solid var(--control);
-  border-color: var(--control);
-}
-
 .feature__chip {
   display: inline-flex;
   align-items: center;
-  padding: 2px 7px;
-  font-size: 11.5px;
+  gap: 5px;
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
   color: var(--text);
   background: var(--raised);
   border: 1px solid var(--control);
-  border-radius: 999px;
+  border-radius: 5px;
   cursor: pointer;
 }
-
-.feature__chip:hover:not(:disabled) {
-  border-color: var(--danger);
-}
+.feature__chip:hover:not(:disabled) { border-color: var(--color-danger); }
+.feature__custom .feature__add:hover:not(:disabled),
+.feature__group > .section__head .btn:hover:not(:disabled) { transform: none; }
 
 .feature__keep {
   display: flex;
@@ -874,38 +894,26 @@
   height: 14px;
 }
 
-/* ------------------------------------------------ C5 · run + status (design spec)
- *
- * The primary action is the one bright element on the page: full width, bright
- * gold, dark text. The secondary controls stack beneath it so the row reads top to
- * bottom as primary-then-optional. */
+/* Three compact actions, wrapping only when the available width requires it. */
 .feature__run {
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
   gap: 10px;
 }
-
 .feature__run .btn {
-  width: 100%;
-}
-
-.feature__run .btn.btn--sm {
-  width: auto;
-  align-self: flex-start;
-}
-
-.feature__runprimary {
-  background: var(--accent-bright);
-  color: var(--on-accent);
-  min-height: 44px;
-  margin-top: 24px;
-  font-size: 15px;
+  flex: 0 1 160px;
+  width: 160px;
+  max-width: 100%;
+  min-height: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
   font-weight: 600;
 }
-
-.feature__runprimary:hover:not(:disabled) {
-  background: var(--accent-bright-hover);
-}
+.feature__runprimary { background: var(--accent-bright); color: var(--on-accent); }
+.feature__runprimary:hover:not(:disabled) { background: var(--accent-bright-hover); }
 
 .feature__status {
   background: var(--bg-status);
@@ -945,7 +953,7 @@
 }
 
 .infotip__button:hover,
-.infotip__button[aria-expanded="true"] {
+.infotip__button:focus-visible {
   color: var(--on-accent);
   background: var(--control);
 }
@@ -957,28 +965,9 @@
 }
 
 .infotip__button--caution:hover,
-.infotip__button--caution[aria-expanded="true"] {
+.infotip__button--caution:focus-visible {
   color: var(--bg);
   background: var(--warn);
-}
-
-.infotip__panel {
-  position: absolute;
-  top: 21px;
-  left: 0;
-  z-index: 9999;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 330px;
-  padding: 9px 11px;
-  font-size: 12px;
-  line-height: 1.5;
-  background: var(--bg-input);
-  border: 1px solid var(--border-card);
-  border-radius: var(--radius);
-  box-shadow: var(--tooltip-shadow);
-  color: var(--text-primary);
 }
 
 .infotip__formula {
@@ -1008,14 +997,12 @@
  * diagnostics are laid out in.
  *
  * Every colour here is a token. The five state colours are *not* invented in this
- * stylesheet — they come from STATE_COLOUR in RegimePage.tsx, because Plotly needs the
- * same literal strings to draw the traces and a second copy here would let the chart and
- * the legend drift apart. CSS references them only for the swatch.
+ * stylesheet — the state tokens in themes.css are shared with Plotly and the swatches.
  */
 
 .regime__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
   gap: 18px;
 }
 
@@ -1046,7 +1033,7 @@
 
 .regime__warning--error,
 .scaling__warning--error {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 /* The gray-zone note is deliberately not the danger colour. A reading below the
@@ -1061,14 +1048,8 @@
 
 .regime__gauges {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) minmax(240px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 14px;
-}
-
-@media (max-width: 900px) {
-  .regime__gauges {
-    grid-template-columns: 1fr;
-  }
 }
 
 .regime__gauge-state {
@@ -1162,7 +1143,7 @@
 }
 
 .regime__bad {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 /* An unavailable model reads as unavailable, not as a disabled control that the user
@@ -1181,7 +1162,7 @@
  * pairs rather than as one undifferentiated list of six boxes. */
 .split__dates {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: 12px;
   margin: 10px 0 0 26px;
   padding-top: 10px;
@@ -1279,15 +1260,15 @@
 }
 
 .timeline__swatch--train {
-  background: var(--ok);
+  background: var(--timeline-train);
 }
 
 .timeline__swatch--val {
-  background: var(--warn);
+  background: var(--timeline-validation);
 }
 
 .timeline__swatch--test {
-  background: var(--accent);
+  background: var(--timeline-test);
 }
 
 .timeline__body {
@@ -1331,15 +1312,15 @@
 }
 
 .timeline__bar--train {
-  background: var(--ok);
+  background: var(--timeline-train);
 }
 
 .timeline__bar--val {
-  background: var(--warn);
+  background: var(--timeline-validation);
 }
 
 .timeline__bar--test {
-  background: var(--accent);
+  background: var(--timeline-test);
 }
 
 .timeline__bar-text {
@@ -1366,7 +1347,7 @@
 }
 
 .scaling__plan .field {
-  min-width: 260px;
+  min-width: min(260px, 100%);
   max-width: 56ch;
   flex: 1 1 260px;
 }
@@ -1378,15 +1359,12 @@
  * full-width fields would hide the two that are actually coupled (the walk-forward
  * windows) among the ones that are not.
  *
- * The model colours are *not* invented here: they come from MODEL_COLOUR in
- * VolatilityPage.tsx, because Plotly needs the same literal strings to draw the traces and
- * a second copy here would let the swatch beside a table row drift from the line it
- * labels. CSS references them only through the TSX.
+ * Model colors use the categorical tokens shared by Plotly and the legend swatches.
  */
 
 .vol__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
   gap: 18px;
 }
 

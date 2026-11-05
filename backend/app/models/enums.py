@@ -24,7 +24,7 @@ class Provider(StrEnum):
 
 
 class DatasetCategory(StrEnum):
-    """The four buckets the Data Explorer groups datasets into.
+    """The buckets the Data Explorer groups datasets into.
 
     `UPLOADED` is deliberately distinct from `RAW`: both are immutable, but a raw
     dataset has verifiable provider provenance and an uploaded one does not.
@@ -33,6 +33,10 @@ class DatasetCategory(StrEnum):
     RAW = "raw_data"
     UPLOADED = "uploaded_data"
     PROCESSED = "processed_data"
+    SPLITS = "splits"  # Accepted for old catalogs; plans migrate to outputs.
+    TRAINED = "trained_data"
+    FORECAST = "forecast_data"
+    MODEL = "model_data"
     OUTPUTS = "outputs"
 
 
@@ -193,7 +197,7 @@ class SplitType(StrEnum):
 
     @property
     def is_tscv(self) -> bool:
-        """Whether this split produces one train/test pair per fold.
+        """Whether this split produces folds, with optional validation spans.
 
         Read by the scaling module, which must fit per fold: statistics pooled across
         folds would be computed from rows that lie *after* an early fold's test span,
@@ -205,9 +209,8 @@ class SplitType(StrEnum):
 class SplitRole(StrEnum):
     """What a span in a split plan is for.
 
-    ``VAL`` is absent from every TSCV plan by construction rather than by omission: a
-    walk-forward scheme has no separate validation span, because each fold's test block
-    already plays that part for the fold before it.
+    Walk-forward plans have training and test spans, with validation when requested.
+    Date-based two-way plans deliberately omit validation.
     """
 
     TRAIN = "train"
@@ -218,12 +221,9 @@ class SplitRole(StrEnum):
 class ScalerType(StrEnum):
     """How feature columns are rescaled.
 
-    ``ROLLING_ZSCORE`` is not a member of the same family as the other three and is not
-    labelled as one. Min-Max, Standard and Robust each estimate a *fixed* pair of numbers
-    over a span of history and apply it to every row, so they need a split plan to say
-    which history may be looked at. The rolling z-score estimates a fresh mean and
-    standard deviation from the trailing window at each row, so it needs no fit, no plan,
-    and cannot be given one — there is nothing to leak.
+    Min-Max, Standard and Robust estimate fixed parameters from the selected fit scope:
+    either all rows or a saved split plan's training rows. Rolling z-score estimates a
+    fresh mean and deviation from each trailing window and takes no split plan.
     """
 
     MINMAX = "minmax"
@@ -232,14 +232,8 @@ class ScalerType(StrEnum):
     ROLLING_ZSCORE = "rolling_zscore"
 
     @property
-    def needs_split_plan(self) -> bool:
-        """Whether this scaler must be fitted on a training span.
-
-        The single place the rule is written. The service refuses on it, the API echoes
-        it to the page, and the page greys the split-plan control with it — one source,
-        so a control the UI presents as optional and a refusal from the backend cannot
-        disagree.
-        """
+    def is_fitted(self) -> bool:
+        """Fixed parameters can be fitted on a plan's train rows or the full dataset."""
         return self is not ScalerType.ROLLING_ZSCORE
 
 
@@ -264,67 +258,6 @@ CRYPTO_METRICS_TIMEFRAMES: frozenset[Timeframe] = frozenset(
 )
 EQUITY_TIMEFRAMES: frozenset[Timeframe] = frozenset(
     {Timeframe.H1, Timeframe.H4, Timeframe.D1}
-)
-
-
-class RegimeModel(StrEnum):
-    """How Module D infers market state.
-
-    ``HYBRID`` and ``RULES`` are separate members rather than one "advanced" option
-    because they answer different questions. ``HYBRID`` keeps the statistical model and
-    adds a classifier trained to reproduce it from faster indicators; ``RULES`` discards
-    the statistical model entirely and fires on a volatility breach alone. The second is
-    a risk control, not an estimator, and conflating them would hide that.
-    """
-
-    HMM = "hmm"
-    GMM = "gmm"
-    HYBRID = "hybrid"
-    RULES = "rules"
-
-
-class RegimeFeature(StrEnum):
-    """The observation vector a regime model is fitted on.
-
-    ``ADX`` and ``RSI`` are deliberately *not* computed by this module. They are
-    methodology-laden indicators the feature catalogue already defines, names, and
-    documents; a second implementation here would be a second formula for one concept,
-    which is the drift the catalogue exists to prevent. They are carried from a C5
-    feature dataset and the request is refused if they are absent.
-    """
-
-    LOG_RETURN = "log_return"
-    REALIZED_VOLATILITY = "realized_volatility"
-    VOLUME_CHANGE = "volume_change"
-    ADX = "adx"
-    RSI = "rsi"
-
-
-class RegimeState(StrEnum):
-    """The named market states, plus the explicit gray zone.
-
-    ``TRANSITION`` is a state in its own right rather than an absence of one. Forcing a
-    binary decision when no state holds a clear majority is what produces the thrashing
-    that the minimum-duration rule exists to suppress; naming the ambiguity is the
-    honest alternative to guessing.
-    """
-
-    TRENDING_UP = "trending_up"
-    TRENDING_DOWN = "trending_down"
-    RANGING = "ranging"
-    CRISIS = "crisis"
-    TRANSITION = "transition"
-
-
-#: The four states that carry a probability column, in the order the specification lists
-#: them. ``TRANSITION`` is absent on purpose: it is derived from the *shape* of these four
-#: (no clear winner), not a fifth competing hypothesis, so giving it its own column would
-#: double-count the same probability mass.
-REGIME_PROBABILITY_COLUMNS: tuple[RegimeState, ...] = (
-    RegimeState.TRENDING_UP,
-    RegimeState.TRENDING_DOWN,
-    RegimeState.RANGING,
-    RegimeState.CRISIS,
 )
 
 

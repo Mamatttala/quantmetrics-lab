@@ -1,33 +1,12 @@
 """Module C7 — scaling and normalisation.
 
-The whole module exists to make one mistake impossible, and the mistake is worth naming
-because nothing about the wrong answer looks wrong:
+Standard, min-max and robust fit the full selected dataset when no plan is supplied.
+A saved plan restricts the fit to its training rows; a walk-forward plan also requires
+a fold. Split partitions can use their source plan's training rows while retaining their
+own observation range in the output. The report and lineage record the resolved fit scope.
 
-    A scaler fitted on the entire series has already seen the test span. Every training row
-    is then expressed in units that were chosen using the rows the model will be scored on —
-    the mean it subtracts is partly the future's mean, the range it divides by is partly the
-    future's range. The transformed frame is the same shape, the same dtypes, the same row
-    count. It looks exactly like a correctly scaled frame, and the backtest that follows is
-    quietly too good.
-
-So there is no code path here that fits on a whole frame. ``_fit`` receives the training
-rows and nothing else; the transform is applied to the whole frame afterwards, which is the
-correct direction — transforming test rows with training statistics is the entire point.
-
-Two consequences fall out of that, and both are refusals rather than defaults:
-
-* A fitted scaler **requires** a split plan (``ScalerType.needs_split_plan``). The three
-  fitted members cannot be run without one, at the model layer and again in the service.
-* A walk-forward plan requires a **fold**, because it holds one train/test pair per fold.
-  Fitting on the union of every fold's training rows would compute fold 1's statistics from
-  rows lying after fold 1's test span — look-ahead relative to fold 1, and hidden inside what
-  looks like the conservative choice.
-
-The one scaler that needs neither is the rolling z-score, and it is not lucky: it estimates
-its mean and standard deviation from the trailing window at each row, so it cannot contain
-information from a row that has not happened yet. Causality there is a property of the
-arithmetic, and the verification suite asserts it by computing the series twice — once whole,
-once truncated to 80% — and requiring the shared prefix to be identical.
+For model evaluation, fitting on training rows keeps validation and test statistics out
+of the parameters. Rolling z-score uses a causal trailing window and takes no plan.
 """
 
 from __future__ import annotations
@@ -40,7 +19,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
-from app.config import Settings, get_settings
+from app.config import Settings, get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import ValidationFailure
 from app.models.dataset import DatasetMeta
@@ -174,12 +153,9 @@ def _rows_of_role(
 
 
 def _fit(train: pd.DataFrame, features: list[str], scaler_type: ScalerType) -> Any:
-    """Fit one sklearn scaler over the training rows and nothing else.
+    """Fit one sklearn scaler over the resolved fit rows.
 
-    ``train`` is the only frame this function ever sees. It is passed in already sliced so
-    that the slicing decision lives at the call site, where the plan is in scope, and not
-    here, where a default of "the frame you were given" would be one refactor away from
-    being the whole series.
+    The caller selects the full dataset or slices the plan's training rows first.
 
     `MinMaxScaler`, `StandardScaler`, `RobustScaler` — named explicitly rather than reached
     through a registry, because the three differ in what they assume about a distribution
@@ -279,11 +255,7 @@ def _parameters(
 
 
 def _apply(frame: pd.DataFrame, parameters: list[ScalerParameter]) -> pd.DataFrame:
-    """Transform the whole frame with parameters fitted on the training span.
-
-    The whole frame, deliberately: transforming the test rows is not a leak, it is the
-    point. What would leak is *estimating* on them, and that has already happened — or
-    rather, has already been prevented — by the time this runs.
+    """Transform the selected frame with the fitted parameters.
 
     Every other column is carried through untouched, and no row is dropped. A scaling step
     that changed the row count would silently invalidate the split plan it was performed
@@ -379,7 +351,7 @@ class ScalingService:
     """Runs Module C7. Public methods are coroutines."""
 
     def __init__(self, settings: Settings | None = None, catalog: Catalog | None = None) -> None:
-        self.settings = settings or get_settings()
+        self.settings = settings or get_project_settings()
         self.catalog = catalog or Catalog(self.settings.catalog_path)
         self.datasets = DatasetService(self.settings, self.catalog)
         self.splits = SplitService(self.settings, self.catalog)
@@ -395,7 +367,7 @@ class ScalingService:
         a Parquet file, which is the work being deferred. A bad plan id therefore surfaces
         through the job's ``error`` field, and the driver waits for it.
         """
-        parent = await self.datasets.get(request.dataset_id)
+        parent, request = await self._resolve_request(request)
         job_id = await self.jobs.create(
             JOB_KIND,
             dataset_id=parent.dataset_id,
@@ -411,8 +383,23 @@ class ScalingService:
 
         For the drivers and the tests, which want the result rather than a handle.
         """
-        parent = await self.datasets.get(request.dataset_id)
+        parent, request = await self._resolve_request(request)
         return await self._compute(request, parent)
+
+    async def _resolve_request(self, request: ScalingRequest) -> tuple[DatasetMeta, ScalingRequest]:
+        parent = await self.datasets.resolve_frame(request.dataset_id)
+        if parent.dataset_id != request.dataset_id:
+            if request.split_plan_id not in (None, request.dataset_id):
+                raise ValidationFailure("The selected split dataset and split plan must match.")
+            request = request.model_copy(
+                update={
+                    "dataset_id": parent.dataset_id,
+                    "split_plan_id": (
+                        request.dataset_id if request.scaler_type.is_fitted else None
+                    ),
+                }
+            )
+        return parent, request
 
     async def job(self, job_id: str) -> JobRecord:
         return await self.jobs.get(job_id)
@@ -440,30 +427,35 @@ class ScalingService:
         string would be a second implementation of a rule pandas already answers — and the
         two would eventually disagree about, say, a decimal or a nullable integer.
         """
-        meta = await self.datasets.get(dataset_id)
+        meta = await self.datasets.resolve_frame(dataset_id)
         path = resolved_path(meta, self.settings)
 
         def work() -> dict[str, Any]:
             frame = parquet_store.read_dataset(path, columns=None)
             available = numeric_features(frame)
-            plans = plans_for(self.catalog, dataset_id)
+            plans = plans_for(self.catalog, meta.dataset_id)
+            if meta.operation == "split_partition" and meta.parent_dataset_id:
+                source_plans = plans_for(self.catalog, meta.parent_dataset_id)
+                # Partitions contain observations, but their plan indexes the source.
+                # Only the plan that produced this partition is offered from the source.
+                plans.extend(
+                    plan for plan in source_plans
+                    if plan.split_plan_id == meta.provenance.get("split_plan_id")
+                )
+            preferred = dataset_id if dataset_id != meta.dataset_id else meta.provenance.get(
+                "split_plan_id"
+            )
 
             scalers: list[dict[str, Any]] = []
             for scaler in ScalerType:
                 reason: str | None = None
-                if scaler.needs_split_plan and not plans:
-                    reason = (
-                        "No split plan exists for this dataset, and "
-                        f"{scaler.value} is fitted on a stretch of history. Make one in C6 "
-                        "Chronological Splits first — fitting on the whole series would "
-                        "carry the test span's statistics into every training row."
-                    )
-                elif not available:
+                if not available:
                     reason = "This dataset has no numeric column to scale."
                 scalers.append(
                     {
                         "id": scaler.value,
-                        "needs_split_plan": scaler.needs_split_plan,
+                        "needs_split_plan": False,
+                        "supports_split_plan": scaler.is_fitted,
                         "available": reason is None,
                         "reason": reason,
                     }
@@ -477,6 +469,10 @@ class ScalingService:
                     "features": available,
                     "window": 60,
                     "scaler_type": ScalerType.STANDARD.value,
+                    "split_plan_id": next(
+                        (p.split_plan_id for p in plans if p.split_plan_id == preferred),
+                        plans[0].split_plan_id if plans else None,
+                    ),
                 },
                 "scalers": scalers,
                 "plans": [plan.model_dump(mode="json") for plan in plans],
@@ -524,6 +520,11 @@ class ScalingService:
             plan_meta, plan = await self._load_plan(
                 request.split_plan_id, parent, request.fold
             )
+        fit_source = parent
+        if plan_meta is not None and plan_meta.parent_dataset_id != parent.dataset_id:
+            if plan_meta.parent_dataset_id is None:
+                raise ValidationFailure("This split plan has no source dataset.")
+            fit_source = await self.datasets.get(plan_meta.parent_dataset_id)
 
         def work() -> ScalingCreated:
             frame = parquet_store.read_dataset(path)
@@ -544,32 +545,30 @@ class ScalingService:
                 fit_role = "trailing window (no fit, no plan)"
             else:
                 window = None
-                # Refused rather than asserted. `ScalingRequest` requires the plan for every
-                # fitted scaler, so this is unreachable through HTTP — but a bare `assert`
-                # disappears under `-O`, and this function is reachable directly from the
-                # tests, where silent whole-series fitting is exactly the bug the module
-                # exists to prevent.
                 if plan_meta is None:
-                    raise ValidationFailure(
-                        f"{request.scaler_type.value} is fitted on a stretch of history, so "
-                        "it needs a split plan to say which rows it may be fitted on."
+                    train_rows = frame
+                    fit_rows = len(frame)
+                    fit_role = "full_dataset"
+                    fit_start = parent.start_timestamp
+                    fit_end = parent.end_timestamp
+                else:
+                    train = _rows_of_role(plan, SplitRole.TRAIN, request.fold)
+                    if not train:
+                        raise ValidationFailure(
+                            "This split plan has no training span to fit on.",
+                            hint="Recreate the plan in C6, or choose another fold.",
+                        )
+                    fit_rows = sum(row.row_count for row in train)
+                    fit_role = SplitRole.TRAIN.value
+                    fit_start = train[0].start_time
+                    fit_end = train[-1].end_time
+                    fit_frame = frame if fit_source.dataset_id == parent.dataset_id else (
+                        parquet_store.read_dataset(resolved_path(fit_source, self.settings))
                     )
-                train = _rows_of_role(plan, SplitRole.TRAIN, request.fold)
-                if not train:
-                    raise ValidationFailure(
-                        "This split plan has no training span to fit on.",
-                        hint="Recreate the plan in C6, or choose another fold.",
+                    train_rows = pd.concat(
+                        [fit_frame.iloc[row.start_index : row.end_index] for row in train],
+                        axis=0,
                     )
-                fit_rows = sum(row.row_count for row in train)
-                fit_role = SplitRole.TRAIN.value
-                fit_start = train[0].start_time
-                fit_end = train[-1].end_time
-                # The slice, and the whole of the golden rule: `train_rows` is built from
-                # the plan's training spans and `frame` is never handed to the fitter.
-                train_rows = pd.concat(
-                    [frame.iloc[row.start_index : row.end_index] for row in train],
-                    axis=0,
-                )
                 _require_fittable(train_rows, features)
                 scaler = _fit(train_rows, features, request.scaler_type)
                 per_feature = {
@@ -593,6 +592,8 @@ class ScalingService:
                 split_plan_name=plan_meta.name if plan_meta else None,
                 fold=request.fold,
                 fit_role=fit_role,
+                fit_dataset_id=fit_source.dataset_id,
+                fit_dataset_name=fit_source.name,
                 fit_rows=fit_rows,
                 fit_start_time=fit_start,
                 fit_end_time=fit_end,
@@ -616,13 +617,13 @@ class ScalingService:
                     # feeds the next module, exactly like a C5 feature dataset. The regime
                     # labels that go to `outputs` are a different kind of object.
                     category=DatasetCategory.PROCESSED,
-                    name=request.name
-                    or f"{parent.name} ({request.scaler_type.value} scaled)",
+                    name=request.name,
                     operation=MODULE_SOURCE,
                     detail=_lineage_detail(request, report, parameters),
                     extra_provenance={
                         "module_source": MODULE_SOURCE,
                         "scaler_type": request.scaler_type.value,
+                        "scaler_fit_role": fit_role,
                         "split_plan_id": plan_meta.dataset_id if plan_meta else "",
                         "scaled_features": ",".join(features),
                         "scaler_window": str(window) if window is not None else "",
@@ -644,7 +645,7 @@ class ScalingService:
                     data_dir=self.settings.data_dir,
                     catalog=self.catalog,
                     category=DatasetCategory.OUTPUTS,
-                    name=f"{stored.name} — scaler parameters",
+                    name=None,
                     operation=PARAMS_OPERATION,
                     detail={
                         "module_source": MODULE_SOURCE,
@@ -683,14 +684,24 @@ class ScalingService:
         * The plan must have been computed on the same bytes. The checksum comparison is
           the mechanical form of the same rule, and it catches the case the lineage cannot:
           a dataset re-written in place.
-        * A walk-forward plan needs a **fold**. It holds one train/test pair per fold, and
+        * A walk-forward plan needs a **fold**. Each fold has its own training span, and
           fitting on the union of every fold's training rows would compute early folds'
           statistics from rows lying after their test spans — the conservative-looking
           choice, and look-ahead.
         """
         plan_meta, plan = await self.splits.load_plan(split_plan_id)
 
-        if plan_meta.parent_dataset_id != parent.dataset_id:
+        plan_parent = parent
+        if (
+            parent.operation == "split_partition"
+            and parent.parent_dataset_id is not None
+            and parent.provenance.get("split_plan_id") == split_plan_id
+            and plan_meta.parent_dataset_id == parent.parent_dataset_id
+        ):
+            plan_parent = await self.datasets.resolve_frame(parent.parent_dataset_id)
+            if parent.provenance.get("split_dataset_checksum") != plan_parent.checksum:
+                raise ValidationFailure("This split partition's source checksum does not match.")
+        if plan_meta.parent_dataset_id != plan_parent.dataset_id:
             raise ValidationFailure(
                 f"'{plan_meta.name}' is a split plan for a different dataset, so its row "
                 "indices address different bars.",
@@ -699,11 +710,11 @@ class ScalingService:
         if not plan:
             raise ValidationFailure(f"'{plan_meta.name}' contains no spans.")
         checked = plan[0].dataset_checksum
-        if checked != parent.checksum:
+        if checked != plan_parent.checksum:
             raise ValidationFailure(
                 f"'{plan_meta.name}' was computed on a different version of "
-                f"'{parent.name}' (checksum {checked[:12]}…, current "
-                f"{parent.checksum[:12]}…), so its row indices may no longer line up.",
+                f"'{plan_parent.name}' (checksum {checked[:12]}…, current "
+                f"{plan_parent.checksum[:12]}…), so its row indices may no longer line up.",
                 hint="Recreate the plan in C6 against the current dataset.",
             )
 
@@ -813,6 +824,7 @@ def _lineage_detail(
             "features": report.features,
             "window": report.window,
             "fit_role": report.fit_role,
+            "fit_dataset_id": report.fit_dataset_id,
             "fit_rows": report.fit_rows,
             "fit_start_time": _iso(report.fit_start_time),
             "fit_end_time": _iso(report.fit_end_time),
@@ -845,24 +857,13 @@ def _option_warnings(
                 "message": "This dataset has no numeric column to scale.",
             }
         )
-    if not plans:
-        warnings.append(
-            {
-                "level": "warning",
-                "code": "no_split_plan",
-                "message": "No split plan exists for this dataset, so the three fitted "
-                "scalers are unavailable. Make one in C6 first. The rolling z-score needs "
-                "no plan — it standardises each row against its own trailing window.",
-            }
-        )
-    else:
+    if plans:
         warnings.append(
             {
                 "level": "warning",
                 "code": "fit_on_train_only",
-                "message": "The scaler will be fitted on the training span of the chosen "
-                "plan and applied to every row. The transformed test rows will not be "
-                "centred at zero — that is the correct result, not a fault.",
+                "message": "Saved split plans are available. Choose a plan to fit only "
+                "on its training rows, or choose Entire dataset to fit all selected rows.",
             }
         )
     if meta.row_count < 120:
@@ -912,6 +913,12 @@ def _run_warnings(
                 "No fold was given, so this plan has a single train span and the fit is "
                 "against all of it."
             )
+    elif request.scaler_type.is_fitted:
+        notes.append(
+            f"Fitted on the entire selected dataset ({len(frame)} rows). "
+            "No split plan was used. For model evaluation, choose a saved plan to "
+            "estimate parameters on training rows only."
+        )
     if per_feature:
         most = max(per_feature.values())
         thin = sorted(name for name, count in per_feature.items() if count < most)
@@ -941,7 +948,7 @@ def _summary_message(payload: ScalingCreated) -> str:
     )
     fitted = (
         f"fitted on {report.fit_rows} rows"
-        if report.scaler_type.needs_split_plan
+        if report.scaler_type.is_fitted
         else f"trailing {report.window}-bar window"
     )
     return (

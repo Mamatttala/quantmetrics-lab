@@ -17,7 +17,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import type { OhlcvBar, QualityMarker, QualityKind } from "@/api/types";
-import { candleTheme, useTheme } from "@/theme";
+import { candleTheme, themeColor, useTheme } from "@/theme";
 
 interface MarkerStyle {
   color: string;
@@ -36,43 +36,43 @@ interface MarkerStyle {
  *  that *are* listed are the ones the API emits markers for. */
 const MARKER_STYLE: Partial<Record<QualityKind, MarkerStyle>> = {
   extreme_return: {
-    color: "#8b5cf6",
+    color: "--quality-extreme",
     shape: "circle",
     position: "aboveBar",
     label: "extreme return",
   },
   non_positive_price: {
-    color: "#ef4444",
+    color: "--quality-invalid",
     shape: "square",
     position: "belowBar",
     label: "non-positive price",
   },
   high_below_low: {
-    color: "#fbbf24",
+    color: "--quality-warning",
     shape: "square",
     position: "aboveBar",
     label: "high < low",
   },
   duplicate_timestamp: {
-    color: "#fbbf24",
+    color: "--quality-warning",
     shape: "circle",
     position: "belowBar",
     label: "duplicate timestamp",
   },
   timestamp_out_of_order: {
-    color: "#fbbf24",
+    color: "--quality-warning",
     shape: "arrowDown",
     position: "aboveBar",
     label: "out of order",
   },
   missing_value: {
-    color: "#888888",
+    color: "--quality-missing",
     shape: "square",
     position: "belowBar",
     label: "missing value",
   },
   missing_bar: {
-    color: "#888888",
+    color: "--quality-missing",
     shape: "arrowUp",
     position: "belowBar",
     label: "missing bar",
@@ -85,7 +85,7 @@ const MARKER_STYLE: Partial<Record<QualityKind, MarkerStyle>> = {
  *  the effect, taking the whole chart with it, on exactly the datasets whose
  *  anomalies were worth looking at. */
 const DEFAULT_MARKER_STYLE: MarkerStyle = {
-  color: "#888888",
+  color: "--quality-unknown",
   shape: "circle",
   position: "aboveBar",
   label: "quality marker",
@@ -204,7 +204,7 @@ export function Candles({ bars, markers, height = 480 }: CandlesProps) {
     const volume = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
       priceScaleId: "volume",
-      color: "rgba(136,136,136,0.5)",
+      color: colours.volume,
     });
     chart.priceScale("volume").applyOptions({
       scaleMargins: { top: 0.82, bottom: 0 },
@@ -279,6 +279,7 @@ export function Candles({ bars, markers, height = 480 }: CandlesProps) {
     const candles = candleRef.current;
     const volume = volumeRef.current;
     if (candles === null || volume === null) return;
+    const colours = candleTheme();
 
     candles.setData(
       bars.map((bar) => ({
@@ -296,7 +297,7 @@ export function Candles({ bars, markers, height = 480 }: CandlesProps) {
         // Volume bars take the candle's direction so a glance at the lower band
         // tells you whether the move was bought or sold.
         color:
-          bar.close >= bar.open ? "rgba(74,222,128,0.42)" : "rgba(239,68,68,0.42)",
+          bar.close >= bar.open ? colours.volumeUp : colours.volumeDown,
       })),
     );
     chartRef.current?.timeScale().fitContent();
@@ -315,7 +316,7 @@ export function Candles({ bars, markers, height = 480 }: CandlesProps) {
           time: marker.time as UTCTimestamp,
           position: style.position,
           shape: style.shape,
-          color: style.color,
+          color: themeColor(style.color),
           text: style.label,
           size: 1,
         };

@@ -21,13 +21,19 @@ const DATASET: DatasetSummary = {
   created_at: "2026-01-05T04:00:00Z",
   parent_dataset_id: null,
   operation: null,
+  artifact_kind: "observations",
+  origin_page: "A1",
 };
 
 function renderExplorer(): void {
   render(
     <MemoryRouter initialEntries={["/data"]}>
       <ThemeProvider>
-        <DataExplorer onHide={vi.fn()} />
+        <DataExplorer
+          project={{ project_id: "default", name: "Default project", created_at: "2026-01-01T00:00:00Z" }}
+          projectControls={null}
+          onHide={vi.fn()}
+        />
         <LocationProbe />
       </ThemeProvider>
     </MemoryRouter>,
@@ -84,18 +90,40 @@ describe("DataExplorer dataset actions", () => {
     expect(api.listDatasets).toHaveBeenCalledTimes(2);
   });
 
-  it("opens the raw view, cleaning, and merge pages without row navigation", async () => {
+  it("opens Data Management when a dataset is clicked", async () => {
     renderExplorer();
-    await screen.findByText("BTC hourly");
+    fireEvent.click(await screen.findByRole("button", { name: "BTC hourly" }));
 
-    const quickActions = [
-      ["Open in Raw Data View (A2)", "/view/dataset-1"],
-      ["Open in Cleaning (B3)", "/cleaning/dataset-1"],
-      ["Open as the base in Resample & Merge (B4)", "/resample/dataset-1"],
-    ] as const;
-    for (const [title, path] of quickActions) {
-      fireEvent.click(screen.getByTitle(title));
-      await waitFor(() => expect(screen.getByTestId("location").textContent).toBe(path));
-    }
+    await waitFor(() =>
+      expect(screen.getByTestId("location").textContent).toBe("/data/dataset-1"),
+    );
+  });
+
+  it("groups observation splits separately from their boundary plans", async () => {
+    vi.mocked(api.listDatasets).mockResolvedValue([
+      {
+        ...DATASET,
+        dataset_id: "partition-1",
+        name: "BTC split train",
+        category: "processed_data",
+        operation: "split_partition",
+        origin_page: "C6",
+      },
+      {
+        ...DATASET,
+        dataset_id: "plan-1",
+        name: "BTC split plan",
+        category: "outputs",
+        operation: "split",
+        artifact_kind: "split_plan",
+        origin_page: "C6",
+      },
+    ]);
+    renderExplorer();
+
+    expect(await screen.findByText("Processed Data")).toBeTruthy();
+    expect(screen.getByText("Chronological Splits")).toBeTruthy();
+    expect(screen.getByText("Outputs")).toBeTruthy();
+    expect(screen.getByText("Split Plans")).toBeTruthy();
   });
 });

@@ -24,12 +24,14 @@ from typing import Any, Literal
 import httpx
 import pandas as pd
 
-from app.config import get_settings
+from app.config import get_project_settings
 from app.core.blocking import run_blocking
-from app.core.errors import SpanTooWide, UpstreamError, ValidationFailure
+from app.core.errors import UpstreamError, ValidationFailure
 from app.models.enums import AssetClass, Timeframe
 
 DUMP_BASE = "https://data.binance.vision/data"
+_DUMP_CONCURRENCY = 8
+_DUMP_BATCH_SIZE = 64
 
 #: REST page sizes. Spot caps at 1000, futures at 1500; asking for more returns an
 #: error rather than a truncated page, but using the documented maximum minimises
@@ -143,7 +145,7 @@ def _ms(moment: datetime) -> int:
 
 
 def _client() -> httpx.AsyncClient:
-    settings = get_settings()
+    settings = get_project_settings()
     return httpx.AsyncClient(
         timeout=settings.http_timeout_seconds,
         headers={"User-Agent": "quantmetrics-lab/0.1 (local research)"},
@@ -154,7 +156,7 @@ def _client() -> httpx.AsyncClient:
 async def _get_json(
     client: httpx.AsyncClient, url: str, params: dict[str, Any]
 ) -> Any:
-    settings = get_settings()
+    settings = get_project_settings()
     last: Exception | None = None
     for attempt in range(settings.http_max_retries):
         try:
@@ -239,7 +241,7 @@ async def fetch_klines(
         raise ValidationFailure("Start date must be before end date.")
 
     symbol = normalise_symbol(symbol_input)
-    settings = get_settings()
+    settings = get_project_settings()
     is_futures = asset_class == AssetClass.CRYPTO_FUTURES
     base = settings.binance_futures_base if is_futures else settings.binance_spot_base
     path = "/fapi/v1/klines" if is_futures else "/api/v3/klines"
@@ -316,7 +318,7 @@ async def _download_zip_csv(
     be the file's *full* layout, not the subset being kept: a length mismatch here
     would surface as a pandas error rather than as the read it was meant to be.
     """
-    settings = get_settings()
+    settings = get_project_settings()
     response: httpx.Response | None = None
     last: Exception | None = None
 
@@ -408,51 +410,66 @@ async def _collect_dump(
     *,
     monthly: bool,
 ) -> list[pd.DataFrame]:
-    """Walk monthly then daily dump files across the requested range."""
+    """Collect any date range in bounded batches, preserving source resolution.
+
+    Funding uses monthly files and fills each missing month with daily files.
+    Metrics are daily-only; download batch size is independent of the date span.
+    """
     frames: list[pd.DataFrame] = []
     start_d, end_d = start.date(), end.date()
     # The file's own full layout, used only when a file turns out to be headerless.
     layout = FUNDING_COLUMNS if kind == "fundingRate" else METRICS_DUMP_FIELDS
+    months = _month_starts(start_d, end_d) if monthly else []
+
+    def daily_urls(first: date, last: date) -> list[str]:
+        return [
+            f"{DUMP_BASE}/futures/um/daily/{kind}/{symbol}/"
+            f"{symbol}-{kind}-{(first + timedelta(days=i)).isoformat()}.zip"
+            for i in range((last - first).days + 1)
+        ]
 
     if monthly:
         requests = [
             f"{DUMP_BASE}/futures/um/monthly/{kind}/{symbol}/"
             f"{symbol}-{kind}-{m.strftime('%Y-%m')}.zip"
-            for m in _month_starts(start_d, end_d)
+            for m in months
         ]
     else:
-        # Metrics are published daily only; funding has both. Daily walking covers
-        # the partial months at each end of a range.
-        span = (end_d - start_d).days + 1
-        if span > 800:
-            raise SpanTooWide(
-                f"Daily dump walk of {span} days is too wide for {kind}.",
-                hint="The monthly files cover whole months; narrow the range or use "
-                "monthly granularity.",
-                days=span,
-            )
-        requests = [
-            f"{DUMP_BASE}/futures/um/daily/{kind}/{symbol}/"
-            f"{symbol}-{kind}-{(start_d + timedelta(days=i)).isoformat()}.zip"
-            for i in range(span)
-        ]
+        requests = daily_urls(start_d, end_d)
 
     # Modest concurrency: these are static files on a CDN, but hammering it is both
     # rude and liable to get us throttled.
-    semaphore = asyncio.Semaphore(8)
+    semaphore = asyncio.Semaphore(_DUMP_CONCURRENCY)
 
     async def one(url: str) -> pd.DataFrame | None:
         async with semaphore:
             return await _download_zip_csv(client, url, columns=layout)
 
-    results = await asyncio.gather(*(one(u) for u in requests), return_exceptions=True)
-
     hard_failures: list[BaseException] = []
-    for item in results:
-        if isinstance(item, BaseException):
-            hard_failures.append(item)
-        elif item is not None and not item.empty:
-            frames.append(item)
+    fallback: list[str] = []
+    for offset in range(0, len(requests), _DUMP_BATCH_SIZE):
+        batch = requests[offset:offset + _DUMP_BATCH_SIZE]
+        results = await asyncio.gather(*(one(u) for u in batch), return_exceptions=True)
+        for index, item in enumerate(results, start=offset):
+            if isinstance(item, BaseException):
+                hard_failures.append(item)
+            elif item is not None and not item.empty:
+                frames.append(item)
+            elif monthly:
+                month = months[index]
+                next_month = date(month.year + month.month // 12, month.month % 12 + 1, 1)
+                fallback.extend(daily_urls(
+                    max(start_d, month), min(end_d, next_month - timedelta(days=1)),
+                ))
+
+    for offset in range(0, len(fallback), _DUMP_BATCH_SIZE):
+        batch = fallback[offset:offset + _DUMP_BATCH_SIZE]
+        results = await asyncio.gather(*(one(u) for u in batch), return_exceptions=True)
+        for item in results:
+            if isinstance(item, BaseException):
+                hard_failures.append(item)
+            elif item is not None and not item.empty:
+                frames.append(item)
 
     if hard_failures:
         # Deliberately fatal even when some files arrived. Storing the subset would
@@ -462,8 +479,9 @@ async def _collect_dump(
         # detect afterwards. A missing file is a 404 and returns None above; reaching
         # here means the download actually failed, and retrying is the honest answer.
         first = hard_failures[0]
+        requested_files = len(requests) + len(fallback)
         raise UpstreamError(
-            f"{len(hard_failures)} of {len(requests)} {kind} dump file(s) failed to "
+            f"{len(hard_failures)} of {requested_files} {kind} dump file(s) failed to "
             f"download; refusing to store a dataset with holes. First error: {first}",
             failures=len(hard_failures),
             succeeded=len(frames),
@@ -502,17 +520,11 @@ async def fetch_funding(
 ) -> pd.DataFrame:
     """Funding rate history. Futures only — spot has no funding mechanism."""
     start, end = _as_utc(start), _as_utc(end)
+    if start >= end:
+        raise ValidationFailure("Start date must be before end date.")
     symbol = normalise_symbol(symbol_input)
     async with _client() as client:
         frames = await _collect_dump(client, "fundingRate", symbol, start, end, monthly=True)
-
-    if not frames:
-        # Fall back to the daily files. Monthly funding files are published after the
-        # month closes, so a range ending in the current month has no monthly file yet.
-        async with _client() as client:
-            frames = await _collect_dump(
-                client, "fundingRate", symbol, start, end, monthly=False
-            )
 
     if not frames:
         raise UpstreamError(
@@ -556,6 +568,8 @@ async def fetch_metrics(
     from app.models.enums import CRYPTO_METRICS_TIMEFRAMES
 
     start, end = _as_utc(start), _as_utc(end)
+    if start >= end:
+        raise ValidationFailure("Start date must be before end date.")
 
     if timeframe not in CRYPTO_METRICS_TIMEFRAMES:
         raise ValidationFailure(

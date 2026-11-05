@@ -1,3 +1,4 @@
+import { Description } from "@/components/Description";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 
@@ -336,8 +337,11 @@ export function DataManagement() {
           }
         />
         <div className="panel muted">
-          No dataset selected. Choose one on the left, or fetch one from Raw Data Fetch
-          (A1).
+          No dataset selected.
+          <Description anchor=".panel">
+            Choose one on the left, or fetch one from Raw Data Fetch
+            (A1).
+          </Description>
         </div>
       </div>
     );
@@ -404,6 +408,10 @@ export function DataManagement() {
             {(
               [
                 ["Source", meta.source],
+                ["Category", meta.category],
+                ["Created by", meta.origin_page ?? "Imported"],
+                ["Artifact type", meta.artifact_kind.replaceAll("_", " ")],
+                ["Operation", meta.operation ?? "none"],
                 ["Asset class", meta.asset_class],
                 ["Symbol", meta.symbol ?? "—"],
                 ["Market type", meta.market_type ?? "—"],
@@ -470,18 +478,18 @@ export function DataManagement() {
         </div>
 
         <div className="actions">
-          <button type="button" className="btn" onClick={() => void save()} disabled={saving}>
+          <button type="button" className="btn edit-grid__action" onClick={() => void save()} disabled={saving}>
             {saving ? "Saving…" : "Save as new dataset"}
           </button>
           <button
             type="button"
-            className="btn btn--ghost"
+            className="btn btn--ghost edit-grid__action"
             onClick={discard}
             disabled={!hasChanges || saving}
           >
             Discard changes
           </button>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={addColumn}>
+          <button type="button" className="btn btn--ghost edit-grid__action" onClick={addColumn}>
             Add column
           </button>
 
@@ -508,7 +516,7 @@ export function DataManagement() {
               type="button"
               className="btn btn--ghost btn--sm"
               onClick={() =>
-                window.open(`/api/datasets/${meta.dataset_id}/export?format=${format}`)
+                window.open(api.datasetExportUrl(meta.dataset_id, format))
               }
             >
               {format === "csv" ? "Export .csv" : format}
@@ -516,7 +524,7 @@ export function DataManagement() {
           ))}
         </div>
 
-        <div className="panel muted" style={{ marginBottom: 10, fontSize: 12 }}>
+        <Description className="panel muted" style={{ marginBottom: 10, fontSize: 12 }}>
           Right-click a column header for rename, remove, select all, cut, copy, and
           paste. Drag a header to reorder — the order you leave the columns in is the
           order that gets saved. Click a cell then shift-click to extend a selection, then use{" "}
@@ -532,7 +540,7 @@ export function DataManagement() {
               null: {[...unpopulated].join(", ")}.
             </>
           )}
-        </div>
+        </Description>
 
         <DataGrid
           datasetId={meta.dataset_id}

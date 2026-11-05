@@ -15,7 +15,7 @@ import pandas as pd
 from fastapi import APIRouter, File, Query, Response, UploadFile
 from pydantic import BaseModel, Field, model_validator
 
-from app.config import get_settings
+from app.config import get_project_settings
 from app.core.blocking import run_blocking
 from app.core.errors import ValidationFailure
 from app.models.dataset import DatasetMeta, DatasetSummary
@@ -440,7 +440,7 @@ async def upload_csv(file: UploadFile = File(...)) -> DatasetMeta:
     if not raw:
         raise ValidationFailure("Uploaded file is empty.")
 
-    settings = get_settings()
+    settings = get_project_settings()
 
     def work() -> DatasetMeta:
         try:
@@ -495,6 +495,9 @@ async def upload_csv(file: UploadFile = File(...)) -> DatasetMeta:
                 "note": "Asset class and timeframe are unset until you supply them.",
             },
         )
+        from app.models.naming import named_metadata
+
+        meta = named_metadata(meta)
         Catalog(settings.catalog_path).insert_dataset(meta)
         return meta
 

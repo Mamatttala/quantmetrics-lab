@@ -8,18 +8,20 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.core.errors import register_exception_handlers
 from app.routers import (
     datasets,
+    exploratory,
     features,
     fetch,
     health,
     jobs,
-    regime,
+    projects,
+    regimes,
     scaling,
     splits,
     volatility,
@@ -36,7 +38,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # missing table discovered mid-request surfaces as a confusing 500.
     from app.storage.catalog import Catalog
 
-    Catalog(settings.catalog_path).initialise()
+    catalog = Catalog(settings.catalog_path)
+    try:
+        catalog.initialise()
+    finally:
+        catalog.close()
+    from app.storage.projects import ProjectStore
+
+    ProjectStore(settings).initialise()
     yield
 
 
@@ -59,15 +68,16 @@ def create_app() -> FastAPI:
     )
 
     register_exception_handlers(app)
-    app.include_router(health.router, prefix=API_PREFIX)
-    app.include_router(datasets.router, prefix=API_PREFIX)
-    app.include_router(features.router, prefix=API_PREFIX)
-    app.include_router(fetch.router, prefix=API_PREFIX)
-    app.include_router(regime.router, prefix=API_PREFIX)
-    app.include_router(splits.router, prefix=API_PREFIX)
-    app.include_router(scaling.router, prefix=API_PREFIX)
-    app.include_router(volatility.router, prefix=API_PREFIX)
-    app.include_router(jobs.router, prefix=API_PREFIX)
+    app.include_router(projects.router, prefix=API_PREFIX)
+    for router in (
+        health.router, datasets.router, features.router, fetch.router,
+        regimes.router,
+        splits.router, scaling.router, exploratory.router,
+        volatility.router, jobs.router,
+    ):
+        app.include_router(
+            router, prefix=API_PREFIX, dependencies=[Depends(projects.project_scope)]
+        )
 
     return app
 

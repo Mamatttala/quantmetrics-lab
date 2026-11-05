@@ -7,6 +7,21 @@ silently in code.
 
 Format: **decision → why → where it lives**.
 
+<!-- reconciliation-notice:start -->
+**Record restored and integrated on 2026-11-04.** The complete contents of
+`old-DECISIONS.md` are preserved below, with their original numbering and wording.
+That backup remains unchanged. New decisions start at §129; rebuilding a module
+supersedes its implementation decisions, not the project's decision history.
+
+**Reading this record.** Historical entries describe the implementation at the time
+they were written. For the rebuilt D9–D11, use [§129–§138](#d-rebuild-decisions).
+The supersession table in §129 identifies the earlier D contracts they replace.
+The original duplicate number 103 is retained and distinguished by its heading:
+Module E's §103 and the later D9 setup §103 are different records. The historical
+“Still open” list and old test totals are not a current verification report.
+Current D evidence, integration gaps and unresolved audit findings appear in §137.
+<!-- reconciliation-notice:end -->
+
 ---
 
 ## 1. Repository root
@@ -1414,6 +1429,12 @@ aggregation rather than implying a per-venue figure the dataset does not have.
 
 ### 56. C6 and C7: interfaces fixed now, not built
 
+<!-- reconciliation-notice:start -->
+> Historical planning entry. The subsequent C6/C7 implementation is recorded in
+> §§84–102; §127 later permits full-dataset C7 fitting. Rebuilt D's separate
+> training-span requirements and their verification limits are in §131 and §137.
+<!-- reconciliation-notice:end -->
+
 **Decision.** C6 (chronological splits) will save a split as an **`outputs` plan table**
 `{fold, role, start, end, bars}` with lineage to the source dataset, never as a mutation of
 the price data. C7's transformations will be fitted **on the training span only** —
@@ -1860,6 +1881,13 @@ many rows the driver's chosen dataset holds — a property of the store, not of 
 
 ## Part D — Regime detection
 
+<!-- reconciliation-notice:start -->
+> Historical D implementation. The D-specific contracts in §§73–83 have been
+> superseded as mapped in §129. Their original rationale is retained. The shared
+> additive-schema decision (§76), upstream ownership of indicators (§80), and
+> lazy-loading principle (§81) remain relevant; old routes and payloads do not.
+<!-- reconciliation-notice:end -->
+
 ### 73. `n_states` defaults to 4, not 3, and the fourth state is not invented
 
 **Decision.** The request model defaults `n_states` to **4** where the specification says 3. The
@@ -2140,6 +2168,119 @@ D1 panel says so in words when `bars_long` is zero.
 `backend/tests/test_regime_engine.py`, `frontend/src/pages/RegimePage.tsx`.
 
 ---
+
+## Module C8 — Exploratory Analysis
+
+### Architecture and fact-check of the expanded C8 brief
+
+C8 extends the existing flat `models/exploratory.py`, `services/exploratory_stats.py`,
+`services/exploratory.py`, and `routers/exploratory.py` implementation. Numerical
+helpers may be split into flat service files. There is no `app/modules/` package.
+NumPy, pandas and SciPy are already declared in `pyproject.toml`; no additional
+numerical dependency is needed. Numerical and storage work runs through
+`core.blocking.run_blocking`. Analysis requests keep the durable 202/job/poll
+contract; the frontend also accepts an immediate 200 report. Validation failures
+use `ValidationFailure`/422, including failures recorded on accepted jobs.
+
+Fact-check deviations, recorded before implementation:
+
+- Missing dataset IDs remain **404**, following the common `DatasetNotFound`
+  contract and existing API tests. Invalid analysis choices remain 422.
+- Existing small-sample PCA tests permit mathematically valid fits below 30 rows.
+  PCA therefore warns below `min_obs` rather than refusing; at least two complete
+  observations are required. Correlation still returns null below `min_obs`.
+- Existing PCA save tests require an observation column; this is retained, while
+  full-sample read-only diagnostics work without a timeline. Existing request names
+  remain compatibility aliases for the expanded API names.
+- Module F has no implemented picker yet. Advisory C8 notices are added to the
+  existing D/E pickers, with return-prediction guidance in C8. Existing downstream
+  models retain their own feature-compatibility rules; C8 does not expand those models.
+- The catalog now has eight accepted categories: raw, uploaded, processed,
+  legacy splits, trained, forecast, model and outputs. C8 exposes the catalog's
+  actual vocabulary rather than maintaining a conflicting four-category list,
+  and explores the selected table directly rather than silently resolving it.
+- The tested C8 sign convention chooses the first maximum-absolute loading in
+  feature order and makes it positive. This is retained. A positive loading-sum
+  tie-break can contradict that rule for equal opposite loadings, so it is not
+  substituted for the existing deterministic rule.
+- The existing editable `DataGrid` requires a persisted dataset ID. Diagnostics
+  must remain usable without saving. A shared read-only result grid will reuse
+  its installed AG Grid implementation for sortable/filterable large tables.
+- A rolling series selected by **full-sample top-N ranking** is not causal:
+  selection has seen later rows. Rolling scope therefore refuses top-N selection
+  rather than attaching a causal label to it. All-pairs mode returns summaries;
+  explicit-pairs mode additionally returns row-level rolling series.
+- Dataset names follow the catalog's canonical naming contract. A blank PCA name
+  produces a unique source/scope/operation/ID name; only duplicate user-supplied
+  names are refused. The brief's literal `{dataset_name}_pca` placeholder would
+  bypass the shared naming invariant and is not used.
+- Every saved PCA score dataset has a `pca_parameters` artifact. The earlier
+  `save_parameters` request field was unused and has been removed rather than
+  presenting an option that changed nothing.
+
+### Methodology and reproducibility
+
+C8 is exploratory and does not inherit C7's train-span-only gate. Full-sample and
+custom-range correlation/PCA are allowed, including saves unless optional strict
+causal mode is enabled. Train-span fitting binds to the source ID/checksum and
+one split-plan fold. The causal flag describes **all fitted C8 procedures and
+feature selection**, not the upstream/downstream pipeline; C8 cannot repair
+non-causal source features. Saved outputs record this limitation explicitly.
+
+Stateless differences/returns use the preceding observation only, with no fill.
+Percent change is fractional change; absolute/squared return mean absolute/squared
+fractional change. Log differences require positive non-missing inputs. A scope
+boundary may use its preceding observed value for a stateless difference.
+Standard/robust/minmax scaling, 1%/99% winsorization and mean/median imputation fit
+only on selected fit rows, or separately inside each causal rolling window.
+The rank transform is diagnostic-only; saving it is refused until a fitted rank
+mapping exists. Constants are detected in fit rows and excluded/reported by
+default; users can retain them with warnings or request refusal.
+
+Pairwise complete observations are the correlation default. Each pair reports its
+own sample size; insufficient samples return null coefficients/inference. Partial
+correlation residualizes with an intercept and uses `df = n - rank(controls) - 2`.
+Pearson/partial Pearson use Fisher-z intervals with effective size
+`n - rank(controls)`. Rank-method intervals are null unless deterministic paired
+bootstrap is requested; bootstrap reranks/residualizes within each resample.
+Inference assumes independent observations and is not a time-series correction.
+Bonferroni/BH correction applies separately within each matrix/group. Conditional
+reports contain matrices, pair tables, group sizes and small-group warnings;
+future-derived grouping remains diagnostic. Numeric bins have explicit boundaries.
+
+CCF is `corr(x_t, y_{t+L})`, in observed bars. Positive lags use future targets;
+they are diagnostic only and never saved as row features. Causal lags belong in
+C5. Rolling scope is exclusive: it does not also compute a full-sample matrix,
+VIF, CCF, conditional groups or redundancy diagnostics. It excludes the current
+row, uses trailing windows only, never backfills, and is checked by prefix/truncation tests. Stability is
+`1 / (1 + sample_std_of_finite_rolling_correlations)`. Rolling PCA is deferred.
+
+Static PCA uses NumPy SVD with descending eigenvalues and fixed signs. Standard
+scaling uses sample standard deviation. PCA mean-centers after preprocessing and
+standardization. Scree selection is the maximum distance below the line joining
+the normalized first/last eigenvalues (first maximum wins); parallel analysis
+uses deterministic independent column permutations and a bounded permutation
+count. Whitening divides retained scores by square-root eigenvalues and refuses
+zero-variance selected components. Full-component reconstruction is verified.
+
+PCA fits complete selected-feature rows and transforms all source rows using the
+same fitted preprocessing/scaler/PCA parameters. Missing inputs retain NaN scores
+unless the selected fitted imputation supplies them; fit/transform/missing/NaN
+counts are reported. Output defaults are `outputs` for full/custom fitting and
+`processed_data` for train fitting, with explicit overrides and non-causal
+warnings. Both score and `pca_parameters` artifacts have direct source lineage
+and, for train scope, a split-plan parent. Feature order, parameters, loadings,
+eigenvalues, sign flips and scope metadata make the transform reproducible and
+invertible where the chosen preprocessing itself is invertible.
+
+The C8 sidebar entry remains below C7. Correlation and PCA result state is
+independent; Plotly remains route-lazy and reads `chartTheme()` tokens. The page
+and downstream picker warnings use theme variables, including all five themes.
+
+The full Ruff gate exposed existing formatting/import issues in four browser
+verification helpers and one implicit non-strict zip. Those were corrected without
+changing their checks. The new diagnostics grid shares AG Grid and theme styling
+with the editable dataset grid while keeping diagnostic results read-only.
 
 ## Part C, second pass — C6 Chronological Splits and C7 Scaling
 
@@ -3239,6 +3380,11 @@ correction is visible rather than quietly absorbed.
 
 ## Still open
 
+<!-- reconciliation-notice:start -->
+> Historical open-item snapshot, preserved without asserting that each item is
+> still open today. Rebuilt D's current limitations and audit findings are in §137.
+<!-- reconciliation-notice:end -->
+
 - Whether Yahoo's intraday equity endpoints honour requests for 1h and 4h bars over
   long spans, or silently return only the most recent ~730 days. Yahoo has historically
   restricted intraday history without documenting a limit. The fetcher compares the
@@ -3319,3 +3465,930 @@ correction is visible rather than quietly absorbed.
   correct without it being smaller. The smaller fix is to register the specific feature
   modules the grid actually mounts instead of the whole bundle, which is a build change
   with no behaviour attached and belongs with whatever next touches `DataGrid.tsx`.
+
+## §103 · D9 is a setup-artifact stage
+
+<!-- reconciliation-notice:start -->
+> Superseded D9 setup contract. D9 now fits models, D10 evaluates and approves,
+> and D11 performs inference; see §§129–136. This is the historical D9 §103,
+> not Module E's separate §103 above.
+<!-- reconciliation-notice:end -->
+
+D9 resolves typed server, global, and experiment defaults; inspects observations and C6
+geometry; reports missingness, minimum rows, output compatibility, trial arithmetic and a
+disclosed cost class; and saves the resolved policy. It never fits or evaluates. D10 owns
+estimation and D11 owns evaluation and crisis-policy execution.
+
+The three settled decisions are:
+
+1. `estimator_ready` means a compliant executor exists in the repository. Therefore all
+   detectors are false in the first release, including Gaussian HMM. Its reason records
+   that the kernel exists but must be decoupled from legacy naming/crisis/hybrid behavior.
+2. Gaussian HMM/GMM use the parameter-aware floor
+   `c*(K*d(d+3)/2 + K(K-1) + (K-1))`, currently `c=5`, described verbatim as “a floor
+   on what may be attempted, not a promise of identifiability.”
+3. Setup artifacts are discriminated by `operation=regime_setup_config`. No new artifact
+   kind or schema-version bump is introduced.
+
+Hard-label baselines expose only `hard_labels`; posterior, confidence, entropy, margin,
+and transition outputs are not applicable. Their state count is derived, and baseline HPO
+is disabled. Previous-label persistence requires `lag_bars>=1` on the observation
+timeline plus an `external_label_provenance_hash`; carry-initial-state warns when it is
+equivalent to a constant baseline. GMM and K-Means configuration remains independent of
+an executor library and is bounded to the explicitly advertised covariance/distance
+values.
+
+Canonical configuration JSON uses sorted keys, compact UTF-8, meaningful list order, and
+forbids non-finite numbers. The hash excludes operational identity and catalog references;
+lineage separately links and checksums every referenced input. Alignment stores
+definitions and reference policies only, never fitted signatures or measured state
+statistics. Walk-forward CV is an outer protocol around inner defaults/grid/random
+candidate search. Trial limits sum copies of the same canonical detector.
+
+## §124 · D9.2 and D10 make setup execution an auditable boundary
+
+<!-- reconciliation-notice:start -->
+> Superseded by §§129–136. The setup/executor catalog, coordinator, artifact
+> vocabulary and seven-guard certification below describe the previous D system.
+> They must not be attributed to the rebuilt implementation without new evidence.
+<!-- reconciliation-notice:end -->
+
+This decision supersedes §103 only where §103 describes estimator readiness or D10 as
+future work. D9 remains a setup-artifact stage; its executable policy/default version is
+now D9.2. Historical D9.1 artifacts are preserved and must be re-saved. Catalog
+`SCHEMA_VERSION` is unchanged, no category was added, and legacy
+`app/services/regime_models.py` remains untouched.
+
+The twelve savable catalog entries are `gaussian_hmm`, `multivariate_hmm` (normalized to
+Gaussian HMM with multivariate feature mode), `student_t_hmm`, `gmm_hmm`, `gmm`,
+`kmeans`, `xgboost_classifier`, `random_baseline`, `constant_baseline`,
+`persistence_baseline`, `rule_baseline`, and `historical_frequency_baseline`. All twelve
+are estimator-ready. Advanced HMMs, Markov-switching GARCH, LightGBM, recurrent networks,
+and named hybrids remain visible and unsavable. Generic rules own the savable ordered-rule
+and threshold-bin forms; historical frequency is a distinct fit-span label estimator with
+lexical tie-breaking, no HPO, and hard labels only.
+
+Setup identity is split deliberately. `config_hash` covers canonical logical policy and
+excludes catalog IDs. `bindings_hash` covers every per-experiment source, split plan,
+plan source, validation dataset, baseline reference, and alignment reference ID and
+checksum. `execution_hash` is SHA-256 over canonical `{config_hash, bindings_hash,
+executor_version}`. D10 verifies the setup file, every bound file, catalog checksums, and
+all three identities before dry-run, before fitting, and immediately before persistence.
+
+The bounded executor choices are full-covariance Gaussian and Student-t HMMs, per-state
+full-covariance GMM emissions inside HMM recursion, sklearn full-covariance GMM, sklearn
+Lloyd K-Means with Euclidean distance, and single-worker XGBoost with a stored lexical
+class-index map. Persistence refuses same-bar, insufficient-lag, unverified-label, and
+double-forward forms. Density fits use deterministic per-feature scaling
+`conditioned_j = original_j / c_j`, invert means and covariances before storage, and apply
+the likelihood Jacobian `-Σ log(c_j)` per observation. Failure to recover a direct
+original-unit likelihood is a degenerate refusal, not a warning.
+
+A non-dry request creates exactly one `regime_fit_coordinator` job. It runs experiments
+serially and stores subresults in its own result; there are no child jobs and no FastAPI
+`BackgroundTasks`. Result status is `succeeded`, `failed`, or `partial_success`, so one
+refusal cannot erase a successful sibling. Dry-run creates neither job nor artifact.
+
+Persistence follows this matrix:
+
+| Result | Assignment | Parameters | Manifest | HPO summary | Causal-live claim |
+| --- | --- | --- | --- | --- | --- |
+| `causal_verified` | yes | yes | yes | when run | allowed |
+| `non_causal_diagnostic` | yes | yes | yes | when run | none |
+| `causality_unverified` | yes | yes | yes | when run | withdrawn; test rows become diagnostic-only |
+| `refused_degenerate` | no | no | no | no | none |
+| `refused_leakage` | no | no | no | no | none |
+
+The discriminator operations are `regime_fit_assignment`, `regime_fit_parameters`,
+`regime_fit_manifest`, and `regime_hpo_trial_summary`. Every artifact is an `outputs`
+child of the source and carries lineage to the setup and other bound inputs.
+
+Causal certification uses seven guards: prefix invariance, one-future-bar invariance,
+fit-boundary audit, parameter-selection-boundary audit, fit-only threshold estimation,
+fit-only alignment without raw-index locking, and in-sample marking. Each causal block
+tests at least the first, midpoint, last, post-selection, post-fit, future-append, and
+future-change positions; blocks shorter than seven test every row. States compare exactly;
+numeric outputs use `atol=1e-10`, `rtol=1e-8`. Proven leakage refuses the experiment;
+inconclusive evidence persists only as `causality_unverified` with no causal-live rows.
+
+Filtered HMM probabilities, fixed-parameter pointwise inference, causal fit-span rules,
+lagged persistence, and deterministic hard-label baselines may be causal-live. Smoothed
+and Viterbi outputs are always diagnostic capabilities. Stabilization order is trailing
+probability EMA, filtered candidate, hysteresis, then minimum-duration commitment. EMA and
+hysteresis are HMM-filtered-only. A D10 technical override must use an available,
+non-future-derived anchor and preserve raw, stabilized, and overridden states.
+
+D11 still owns semantic regime names, evaluation, current-regime reporting, semantic
+locks/templates, and default crisis-policy execution. D10 states are technical indices or
+declared baseline labels; its optional override is explicit technical metadata, not a
+semantic crisis label.
+
+## §125 · D10.1 repairs assignment identity and fit-reference persistence without refitting
+
+<!-- reconciliation-notice:start -->
+> Superseded persistence contract. Rebuilt assignments and approval bundles use
+> the contracts in §§133–136; the D10.0/D10.1 adapter and row classes below are
+> retained as history, not documented as current compatibility support.
+<!-- reconciliation-notice:end -->
+
+This decision supersedes §124 only for the D10 assignment and manifest contract. The
+numerical executor remains `d10.0`; persisted manifests declare
+`manifest_contract_version=d10.1`. No catalog category, `record_kind`, schema-version bump,
+or change to legacy `app/services/regime_models.py` is introduced.
+
+The assignment preserves the resolved physical observation column, normally `open_time`.
+That name must be a positive member of `TIME_COLUMN_CANDIDATES`; the generic
+`observation_time` alias is not written. Canonical ownership is `fold_id`.
+`owning_fold_id` is understood only inside the explicit D10.0 compatibility adapter.
+
+The only row classes are `in_sample`, `causal_live`, `diagnostic_only`, and
+`invalid_null`. At the write boundary:
+
+1. `is_in_sample` and `is_causal_live` are derived from the final row class, never trusted
+   from a caller.
+2. `span_role=fit` must have `row_class=in_sample`; persistence raises if it does not.
+3. Assignment identity is `(experiment_id, source_row_index, fold_id)`, without row class,
+   so two classes cannot hide a duplicate emission.
+4. A non-finite validation/test prediction becomes `invalid_null` with null output and
+   metadata. A non-finite fit prediction is `refused_degenerate`, and the experiment writes
+   no artifacts.
+
+Every fold emits fit-reference rows by calling prediction on its already-fitted final model.
+The prediction consumes the manifest-pinned parameters and conditioning scale; recomputing
+that scale would be a hidden refit and is forbidden. HMM fit references use filtered
+posterior state and probabilities only. Smoothed and Viterbi fields are null on those rows,
+even when diagnostic output rows carry the columns. Other detectors emit their normal
+assigned outputs.
+
+`source_row_index`, fit-index ranges, and the fit-index digest all use physical frame-index
+space. The executor's returns-to-frame offset is pinned in each fold and parameter row.
+Fit-reference emission and D11 tier-2 joins apply that same offset. The manifest's
+`in_sample_count` must equal both the persisted class count and the physical-index tier-2
+join substrate count.
+
+Persistence order is assignment, parameters, optional HPO trials, then manifest. The
+manifest pins every sibling ID/checksum, source and D9 identities, execution hashes,
+observation column, row counts, exact four-class counts, per-fold parameter-row index, K,
+fit ranges/digest, returns offset, boundaries, alignment, capabilities and guard results.
+Its lineage includes every pinned sibling. A D10.0 manifest is accepted only with explicit
+sibling IDs, is capped at `non_causal_diagnostic`, and cannot support causal fold-local
+mapping or current-regime claims.
+
+## §126 · D11 evaluates immutable D10 bundles and never recomputes the present
+
+<!-- reconciliation-notice:start -->
+> Superseded D11 evaluation workflow. Evaluation and labeling now belong to D10;
+> D11 runs approved-model inference on submitted observations. The proposal
+> handshake, crisis policy, comparison tests, routes and old verification totals
+> below are historical. Current behavior and evidence are in §§134–137.
+<!-- reconciliation-notice:end -->
+
+D11 exposes `GET /api/regime/evaluation/options`, `POST /api/regime/evaluation/run`, and
+`GET /api/regime/evaluation/current`. Options is the single owner of these limits:
+12 experiments, bootstrap default/maximum 500/2000, explanation-feature default/maximum
+10/25, group-test minimum/warning 5/20, DM minimum 30, weak-separation thresholds 0.25 and
+0.10, transition maximum-probability default 0.55, and dense-rank singleton value 0.5.
+The frontend reads rather than duplicates them.
+
+Run returns 200 for a proposal or completed identical reuse, 202 for new or in-flight work,
+404 for an unknown reference, and 422 for synchronous validation, staleness or
+compatibility refusal. Current accepts an evaluation-manifest ID and reads its pinned
+snapshot. It never recomputes against newer source or fit artifacts.
+
+Mapping is per experiment and owning fold. Tier 1 reads pinned original-unit HMM/GMM
+parameters or K-Means centers when interpretation variables directly match model features.
+Tier 2 groups D10.1 `in_sample` `raw_state` rows and joins source interpretation columns by
+physical `source_row_index`, never timestamp. PCA and other derived-feature fits use tier 2.
+Manual mapping is required only when both automatic tiers are unavailable; verified
+classifier labels may use identity mapping. Fixed schemes require exact K and bijection;
+transition is an overlay, not a fifth semantic scheme.
+
+The automatic-then-manual workflow is a two-request handshake. The server recomputes its
+proposal from the pinned D10 bundle and verifies proposal hash, execution identity, mapping
+origin, typed edits, warning acknowledgements, unchanged K and final mapping. Pure manual
+mode is one-shot and makes no proposal claim.
+
+Directional states sort by fit-reference mean return with deterministic secondary
+statistics and lexical state ID fallback. Crisis components are restricted to explicitly
+bound volatility, downside deviation, drawdown magnitude and tail-risk magnitude. Distinct
+values receive true dense ranks `1..m`; ties share a rank. A component scales to
+`(rank-1)/(m-1)`, or 0.5 when `m=1`, and composite risk is the arithmetic mean of available
+components. Maximum composite risk selects crisis; ties use lower mean return, then higher
+volatility rank when available, then lexical state ID.
+
+This composite-risk crisis rule explicitly **generalizes §73's “lowest-return
+high-volatility” rule**: §73's two signals remain valid components, while D11 adds only
+explicitly bound downside, drawdown and tail-risk evidence and a deterministic tie-break.
+It does not reinterpret an unbound feature as risk.
+
+External labels and risk series join one-to-one on exact observation time. D11 performs no
+nearest, forward, backward, as-of, tolerant, filled or resampled join. Sparse data is
+refused with B4 preparation guidance; backward matching remains a B4 preparation-time
+operation. Crisis quantiles use each fold's in-sample rows and future-derived or sparse
+causal triggers are refused. Transition uses filtered probability-like output only, never
+smoothed/Viterbi, and hard-label detectors need an explicit rule transition.
+
+The causality lattice is `causality_unverified < non_causal_diagnostic < causal`; the least
+trustworthy contribution from D10 rows, mapping scope, triggers, external alignment and
+consensus wins. No snapshot is `not_applicable`. Current regime uses only the latest
+`row_class=causal_live`, `is_causal_live=true` semantic row and its fold mapping. The
+snapshot and semantic-label frame must identify the same row. Diagnostic latest is allowed
+only by explicit evaluation policy, and unverified fits receive descriptive output but no
+causal current claim.
+
+Metrics always carry typed value, scope, direction, causal status, observation count,
+warning and reason. Unsupported/non-finite values are null. Pairwise separation applies
+Benjamini-Hochberg correction; groups below five are not applicable and below twenty warn.
+Filtered/smoothed divergence is diagnostic Jensen-Shannon divergence. DM reuses HAC plus
+Harvey-Laybourne-Newbold, needs at least 30 aligned losses and writes a conclusion.
+Supervised causal scoring records label horizon, provenance and scope and uses regime to
+predict the forward label, never the reverse.
+
+Strict, loose and side-by-side comparison remain family-aware with no composite winner.
+Cross-family ranking requires acknowledgement. A pair below the loose overlap threshold is
+reported as `not_comparable` with its common-row count; it is neither ranked nor tested for
+significance, and both comparison paths enforce the same refusal. Compatible baselines may
+be auto-added inside the twelve-experiment cap and retain their origin.
+
+Economic diagnostics require declared return kind and unit. Exposure at physical row `t`
+earns the next consecutive source row's realized return, gaps break the pair, and costs
+apply to absolute exposure changes. Results remain research-only and non-advisory.
+
+The bundle writes `regime_evaluation_report`, `regime_semantic_labels`,
+`regime_current_snapshot`, optional `regime_model_comparison`, then mandatory
+`regime_evaluation_manifest`. Dataset IDs are ULIDs. A canonical content hash deduplicates
+resolved requests within a project; audited platform/library versions stay outside it. An
+additive reservation table reuses in-flight and completed work, releases failures, and
+leaves outputs written before a manifest failure as non-authoritative orphans. Retries use
+fresh ULIDs and never delete those orphans. Blocking catalog/dataframe/numerical work goes
+through `run_blocking`.
+
+The verified frontend provides both lazy D11 routes, proposal review, configuration for
+mapping/transition/crisis/current/comparison/supervised/economic sections, one protected
+job poll, ten result tabs, point-in-time and causality warnings, `n/a` tooltips, five-theme
+tokens and lazy Plotly. Seeded synthetic E2E fixtures pin per-state statistics so tier-1,
+tier-2, separation, crisis tie-break, current-row equality, deduplication and lineage are
+checked exactly. The full gate passed with Ruff, mypy over 67 source files, 1,472 backend
+tests (8 skipped), 67 frontend tests, TypeScript, production build, ten HTTP drivers and the
+real-browser UI driver.
+
+## §127 · C7 supports full-dataset scaling and persistent split selection; A1 supports multi-year metrics
+
+Standard, min-max and robust accept an optional split plan. Omitting it fits the entire
+selected dataset; supplying it preserves training-only fitting, checksum checks and the
+required fold for walk-forward plans. C7 offers saved plan artifacts in its dataset picker,
+loads their plans from the catalog on entry and refreshes options when the catalog changes.
+A saved split partition can fit against its source plan's training rows while transforming
+only the selected partition. Reports and lineage record fit scope, source and row counts.
+
+Binance metrics use daily archives at five-minute source resolution. The former 800-day
+cap is removed: downloads run in batches of 64 with at most eight concurrent requests,
+and output retains the requested timeframe and UTC bounds. Funding tries monthly archives
+and uses daily files for each missing month, even when other months downloaded successfully.
+Non-404 archive failures still prevent partial datasets from being stored.
+
+## §128 · D9 detector and discovery extensions
+
+<!-- reconciliation-notice:start -->
+> Superseded D extension choices; see §§132–135. In particular, recurrent layers
+> now train through PyTorch, Bayesian/Optuna search executes through Optuna TPE,
+> and the sole registered hybrid is `hmm_xgboost`. MS-GARCH, the older named
+> hybrids and a persistent transition-topology mask are not current D capabilities.
+<!-- reconciliation-notice:end -->
+
+1. **LightGBM dependency.** `lightgbm` is an optional `regime-lightgbm` extra and is used only
+   through an import probe plus the bounded D10 executor. The base install keeps XGBoost as the
+   default. If the optional package cannot be imported, the D9 entries remain visible with an
+   explicit dependency refusal and are not estimator-ready. This qualifies §75 without silently
+   replacing the established XGBoost path.
+2. **Recurrent dependency.** LSTM/GRU entries use deterministic NumPy gated recurrent layers
+   with physical trailing windows, a trainable classification head, explicit warm-up rows, and
+   no mandatory PyTorch dependency. Their fitted feature normalization is fit-span-only and is
+   persisted with the executor parameters.
+3. **MS-GARCH approach.** The switching executor fits bounded per-regime `arch` likelihoods,
+   owns the forward filtering boundary, and records filtered probabilities; smoothed
+   probabilities are never causal output. Initialization, transition counts, variance floors,
+   finite likelihoods, occupancy, and deterministic filtering are persisted as diagnostics.
+4. **Bayesian optimization.** `scikit-optimize` remains the selected future bounded Bayesian
+   optimizer, but is not declared or exposed until an implementation persists bounded trials.
+   Candidate parameters must remain in the declared finite space and use a fixed seed.
+5. **Optuna.** Optuna remains a future local in-memory HPO choice, but is not declared or
+   exposed until the trial executor and persistence tests exist. No external study database is
+   permitted.
+6. **Two-stage execution.** A two-stage detector is one serial D10 coordinator job. Stage 1
+   must finish and pin its causal filtered assignments before Stage 2 trains; no secondary
+   stage may read smoothed or Viterbi labels. Stage-2 features are independently bound and
+   transformed through the same physical row indices.
+7. **Named hybrids.** Hybrid IDs use `<primary>_<secondary>_hybrid` and are separate from
+   the generic two-stage setup so manifests remain self-describing and reproducible. Named and
+   generic hybrids persist the primary/secondary detector identities and filtered fit-label
+   provenance in their parameter artifact.
+8. **Transition topology.** Constrained HMM transitions are masked and renormalized after
+   every M-step. A custom mask is part of the logical config hash; forbidden transitions are
+   never represented as a tiny positive probability.
+9. **Cluster validation scope.** Silhouette, Davies–Bouldin, Calinski–Harabasz, seed stability
+   and minimum occupancy apply only to K-Means/GMM and are stored in the existing inner-loop
+   `regime_hpo_trial_summary`; test rows cannot select K.
+10. **D11 templates.** Predefined state templates are displayed as explicit semantic mapping
+    vocabularies. A template/model K mismatch is a 422 refusal with the observed and expected
+    counts; D11 never pads or silently merges states.
+
+<!-- d-rebuild-additions:start -->
+
+---
+
+<a id="d-rebuild-decisions"></a>
+
+## Part D, rebuilt — D9 discovery, D10 evaluation and approval, D11 inference
+
+These entries integrate the replacement `DECISIONS.md` into the restored historical
+record. They describe the implementation inspected on 2026-11-04 and incorporate
+the subsequent technical audit's qualifications. “Implemented” means executable
+code exists; it does not imply that every configuration is correct or fully tested.
+No application code was changed as part of this reconciliation.
+
+<a id="decision-18--adopt-the-rebuilt-d9d11-regime-workflow-and-document-verified-capabilities"></a>
+
+## §129 · Preserve the decision history and adopt the rebuilt D9–D11 workflow
+
+**Date.** 2026-11-04.
+
+**Status.** Accepted workflow; implemented with the open defects and verification
+limits in §137. This integrates the replacement file's “Decision 18” without
+renumbering or replacing the original §18, “Quality markers may carry a null
+timestamp.” The explicit anchor above preserves existing README/context links.
+
+**Decision.** Restore the supplied `old-DECISIONS.md` as the historical foundation.
+Append and cross-reference new decisions instead of deleting earlier reasoning.
+The replacement file's statement that the previous record had been removed is
+withdrawn as a documentation policy. User datasets and stored research remain
+separate from source-code replacement; old D artifacts cannot serve as approvals
+for the rebuilt model contracts.
+
+The user's D9–D11 master plan and [reference diagram](docs/mermaid-diagram.png)
+establish the current flow:
+
+**A1 → A2 → B3 → B4 → C5 → C6 → C7 → C8 → D9 → D10 → D11.**
+
+D9 selects and fits independent models; D10 evaluates, interprets, validates and
+records explicit researcher approval; D11 loads approved versions for inference.
+Changing D's responsibilities does not authorize changing A1–C8 or Module E.
+
+| Historical decision | Relationship to the rebuilt D implementation |
+| --- | --- |
+| §§73–75 | The old fixed four-probability semantic schema, refit schedule and LightGBM substitution are replaced. Counts and raw state IDs are configurable; C6 defines validation geometry; XGBoost and LightGBM are distinct supervised models. |
+| §76 | Shared additive-schema rationale is retained. Rebuilt D uses the existing project catalog and artifact storage rather than reviving the old D tables/contracts. |
+| §77 | The distinction between filtering and smoothing is retained; the implementation now lives in `services/regimes/hmm.py`. Old test paths are historical. |
+| §78 | Confidence remains the confirmed state's probability when available. The former crisis override that rewrote probability mass is not part of rebuilt D. |
+| §§79, 83 | The old Net Value-Add strategy and position-cost fields are not implemented by the new D10 state profiles. Descriptive return statistics do not establish trading value. |
+| §§80–81 | C5 still owns indicators and heavy charts remain lazy-loaded. Old option endpoints, the old page and the assertion that only one route uses Plotly are superseded. |
+| §82 | Old warm-up/training-prefix field identities are superseded by explicit split/scope fields and method-specific unassigned sequence rows. |
+| D9 setup §103, §§124–125 | Setup-only D9, fitting in D10, the old detector catalog, certification lattice and D10.0/D10.1 manifests are superseded by experiments and versioned bundles. Module E's §103 is unaffected. |
+| §126 | D11 evaluation/proposal/crisis-policy execution is superseded by D10 evaluation/labeling/approval and D11 submitted-data inference. Old comparison tests, deduplication protocol and snapshot guarantees are not inherited. |
+| §127 | C7's full-dataset option and A1 archive-fetch decisions remain recorded. Full-dataset C7 availability does not make its output appropriate for D's chronological modeling. |
+| §128 | PyTorch replaces the former NumPy recurrent approach; Optuna TPE replaces deferred search plans. The current registry excludes MS-GARCH, former baseline variants and additional named/generic hybrids. Transition-matrix initialization is not a topology constraint held through EM. |
+
+**Why.** A decision record must explain what changed and why while retaining the
+reasoning for previous behavior. Restoring old implementations or presenting old
+contracts as current would also be misleading; explicit supersession preserves
+both history and an accurate description of today's D.
+
+**Where.** This record; [implementation plan](docs/regime-implementation-plan.md);
+[architecture diagram](docs/architecture.md); §§130–138 below.
+
+## §130 · Extend the existing application architecture and sidebar hierarchy
+
+**Decision.** Retain React/TypeScript, themed CSS, shared PageHeader/grids, lazy
+Plotly charts, the existing project selector and job polling. Retain FastAPI,
+project settings, SQLite catalog metadata and Parquet observations. The modular
+`app/services/regimes/` package sits within the existing service/router architecture;
+it is not a second backend or a duplicate preprocessing pipeline.
+
+| Boundary | Implementation |
+| --- | --- |
+| Typed inputs and capability registry | `backend/app/services/regimes/contracts.py`, `registry.py` |
+| Data access, C6 spans, C7/C8 integration | `backend/app/services/regimes/data.py` |
+| Estimators and algorithms | `estimators.py`, `hmm.py`, `structural.py`, `neural.py` in the same service package |
+| Experiments and saved artifacts | `experiments.py`, `artifacts.py` |
+| Evaluation, labels, robustness and approval | `metrics.py`, `evaluation.py` |
+| Inference, monitoring and job coordination | `inference.py`, `service.py` |
+| HTTP adapter | `backend/app/routers/regimes.py`, under `/api/regime` |
+| D9 frontend | `frontend/src/pages/regimes/Discovery.tsx`, route `/regime/discovery` |
+| D10 frontend | `frontend/src/pages/regimes/Evaluation.tsx`, route `/regime/evaluation` |
+| D11 frontend | `frontend/src/pages/regimes/Inference.tsx`, route `/regime/inference` |
+| Shared D presentation and API | `frontend/src/pages/regimes/shared.tsx`, `charts.tsx`, `frontend/src/api/regimes.ts` |
+| Hierarchical navigation | `frontend/src/layout/regimeNavigation.ts`: 8 D9, 7 D10 and 8 D11 subsections |
+
+**Why.** Data access, fitting, interpretation, inference and rendering have different
+responsibilities. Separating them inside existing conventions permits extensions
+without giving D its own conflicting storage, indicator or UI system.
+
+**Consequences.** Conditional forms read actual model capabilities. Loading states,
+job failures, informative empty states and plots reflect submitted computations.
+The supplied diagram describes workflow intent; it is not proof of implementation.
+
+## §131 · Consume upstream artifacts and disclose the limits of their verification
+
+**Decision.** `Inputs` binds `dataset_id`, `split_plan_id`, `fold` (default 0), and
+1–100 unique ordered `features`. Asset, asset class, timeframe and observation time
+come from dataset metadata. Optional economic bindings are `market_dataset_id`,
+`price_column` (default `close`), `return_column`, `adx_column`, `rsi_column` and
+`volatility_column`. Original-unit market observations are distinct from transformed
+model features.
+
+`data.load` reads existing observations and C6 plans, verifies their checksums,
+requires unique increasing timestamps, a contiguous training span of at least
+12 observations, a nonempty test span, chronological separation and matching C6
+row counts. `matrix` rejects missing/nonfinite feature values instead of silently
+dropping or filling them. Parameter tables and split tables are not observations.
+
+D consumes C5 columns and selection provenance; it does not regenerate indicators
+or their periods. C6 owns splits. C7 owns scaling and C8 owns correlation/PCA.
+Correlation results inform research choices rather than becoming an additional
+transformation executed in D. Economic columns are aligned by exact observation
+time without D resampling or filling absent values.
+
+The adapter records encountered C7/C8 steps, fitted values, source IDs/checksums,
+fit spans and a preprocessing signature. `check_preprocessing` requires static fit
+spans inside the model's training interval; rolling z-score has a separate causal
+upstream contract and bypasses that static-fit check. D never fits a replacement
+scaler or PCA during model fitting, validation or live inference.
+
+| Inference input | Current behavior and evidence limit |
+| --- | --- |
+| `prepared` | Compare the supplied dataset's preprocessing signature with the approval. This verifies the encountered artifact chain, not every possible source of feature leakage. |
+| `replay`, static C7 | Apply saved `ScalerParameter` values through existing `scaling._apply`. Standard C7 replay has an integration test. |
+| `replay`, simple C8 PCA | Call existing `exploratory_pca.transform_pca`; a real one-component PCA artifact after C7 is tested with `standardizer="none"`. |
+| `replay`, rolling C7 | Explicitly refused because the required upstream historical replay interface is not supplied. |
+| `replay`, C8 pre-transform/imputation | Non-`none` `pre_transform` or configured imputation is refused; D does not reconstruct a second implementation. |
+
+**Important qualification.** “Supply verified prepared output” is an integration
+requirement, not evidence that complex C7/C8 new-observation replay is solved.
+Complete verification needs an upstream artifact-bound transform interface that
+handles the original history, fitted transformations/imputation, feature order and
+timestamps without refitting, plus successful new-observation and per-fold tests.
+The current primary-parent traversal misses secondary merge ancestry (F1), and
+hybrid preprocessing is not checked at the earlier teacher cutoff (F2). Therefore
+the replacement file's blanket preprocessing/leakage guarantees are not retained.
+
+**Where.** `data.read`, `preprocessing`, `check_preprocessing`, `replay`, `load`;
+`inference.infer`; integration evidence and outstanding coverage in §137.
+
+## §132 · Register 18 executable methods with explicit algorithms and capabilities
+
+**Decision.** The following are the 18 current registry entries. Learned models
+have fitting and prediction paths; deterministic baselines have no learned fit.
+PELT segments the supplied sequence rather than learning a deployable classifier.
+Library adapters are genuine implementations using those estimators, not claims
+that their algorithms were independently reimplemented here.
+
+| Registry ID / model | Family and actual implementation | Model-specific options and outputs |
+| --- | --- | --- |
+| `rules` — Rule-Based Classification | Baseline; `estimators.baseline` / `rule_labels`, NumPy thresholds | Existing `feature`, `lower=-0.001`, `upper=0.001`; three hard state IDs. The current rule form is threshold bins, not an arbitrary rule language. |
+| `moving_average` — Moving Average Trend | Baseline; `estimators.baseline`, fast/slow ratio minus one | `fast_column`, `slow_column`, `neutral_band=0.001`; three hard states. Indicators come from C5; a zero slow reference is refused. Zero neutral band has defect F13. |
+| `adx` — ADX Trend Classification | Baseline; `estimators.baseline`, ADX threshold and DI direction | `adx_column`, `plus_di_column`, `minus_di_column`, `threshold=25` (0–100); three hard states. |
+| `trend_volatility` — Trend × Volatility | Baseline; `estimators.baseline`, three trend bins × two volatility bins | `trend_column`, `volatility_column`, lower/upper thresholds −0.001/0.001 and `volatility_threshold=0.02`; six hard states. |
+| `gaussian_hmm` — Gaussian HMM | HMM; `hmm.fit_hmm`, `Emissions`, `HMM`, NumPy/SciPy log-space EM | Exactly one selected feature; shared HMM settings; hidden states, native filtered/smoothed probabilities and retrospective decoded paths. |
+| `multivariate_hmm` — Multivariate Gaussian HMM | HMM; same Gaussian engine with a multivariate feature matrix | At least two selected features; covariance settings below; same supported HMM outputs. It is a configured shared engine, not an unrelated algorithm. |
+| `student_t_hmm` — Student-t HMM | HMM; multivariate Student-t log density and latent-scale EM updates in `hmm.py` | Shared HMM settings; `degrees_of_freedom=5` (2.01–100), held fixed during fitting. Emission scale matrices are not return covariance; covariance is scale × df/(df−2). |
+| `gmm_hmm` — GMM-HMM | HMM; per-state Gaussian mixtures within the shared HMM recursion | Shared settings; `mixtures=2` (1–6), mixture responsibilities/weights, means and covariances. This is not a Student-t-mixture option. |
+| `kmeans` — K-Means | Clustering; `sklearn.cluster.KMeans` | Cluster count, K-Means/random initialization, `n_init=10` (1–50), iterations/tolerance; assignments, Euclidean center distances, centers and inertia. No probabilities. |
+| `gmm` — Gaussian Mixture | Clustering; `sklearn.mixture.GaussianMixture` | Component count, initialization, covariance, `n_init=3` (1–50), iterations/tolerance; assignments, responsibilities, weights, means, covariances and likelihood criteria. |
+| `pelt` — PELT | Structural; `structural.pelt`, custom pruned dynamic programming | `cost="l2"` only, `penalty=10` (>0), `min_segment_length=10` (2–10,000); offline segment IDs, boundaries and cost. Maximum 20,000 observations; no probabilities or live approval. |
+| `cusum` — CUSUM | Structural; `structural.cusum`, two-sided sequential accumulation | `threshold=5` (≥0.01), `drift=0.5` (≥0), `min_segment_length=5` (1–10,000); training-fitted center/scale, sequential segment IDs, scores and alerts, no probabilities. |
+| `logistic` — Logistic Regression | Supervised; `sklearn.linear_model.LogisticRegression` | `C=1` (≥0.00001), `max_iter=500` (1–10,000); explicit targets, class IDs/probabilities, coefficients and intercepts. |
+| `xgboost` — XGBoost | Supervised; `xgboost.XGBClassifier`, class-ID adapter | Shared tree settings; explicit targets, class probabilities and feature importances. Single-worker fitting. |
+| `lightgbm` — LightGBM | Supervised; `lightgbm.LGBMClassifier`, class-ID adapter | Shared tree settings; explicit targets, class probabilities and feature importances. Single-worker fitting; optional dependency. |
+| `lstm` — LSTM | Supervised recurrent; `neural.fit_neural`, CPU `torch.nn.LSTM` | Shared recurrent settings; trailing sequences, end-to-end trained recurrent/head weights, loss history and class probabilities; initial incomplete sequences are unassigned. |
+| `gru` — GRU | Supervised recurrent; `neural.fit_neural`, CPU `torch.nn.GRU` | Same sequence/training controls and output contract; genuine GRU fitting rather than a fixed random reservoir. |
+| `hmm_xgboost` — HMM → XGBoost | Hybrid; `estimators.fit`, earlier Gaussian HMM teacher plus XGBoost student | Shared tree settings, state count, `teacher_fraction=0.5` (0.2–0.8), `teacher_max_iter=100` (1–2,000); student state probabilities, teacher parameters and agreement metrics. |
+
+**Shared controls.** Experiments have `schema_version=1`, a name (1–120 characters),
+default model `gaussian_hmm`, and seed 42 (0–2,147,483,647). Method-specific
+parameters are resolved by the registry; unknown settings are refused.
+
+- HMMs: state count; emission family selected by model ID; `covariance_type` full
+  (default), diag, spherical or tied; `initialization` kmeans (default) or random;
+  `max_iter=100` (1–2,000), `tol=0.0001` (1e−9–1);
+  `transition_stickiness=0.9` (0–1); optional JSON `start_probabilities` and
+  `transition_matrix` with shape/stochastic validation. These initialize EM;
+  they do not freeze parameters or enforce a persistent transition mask.
+- K-Means/GMM share the default initialization, iteration and tolerance controls;
+  GMM also supports the four covariance configurations and uses `reg_covar=1e-6`.
+- Trees: `n_estimators=100` (1–2,000), `max_depth=3` (1–20),
+  `learning_rate=0.05` (0.0001–1).
+- LSTM/GRU: `sequence_length=20` (2–500), `hidden_size=32` (2–256),
+  `layers=1` (1–4), `epochs=25` (1–500), `learning_rate=0.001` (0.00001–1),
+  `batch_size=64` (1–4,096). CPU training and persistence exist; tests do not yet
+  demonstrate learned sequence behavior or recovery of known recurrent weights.
+
+**Dependencies.** XGBoost and scikit-learn are base dependencies. The existing
+`regime-lightgbm` extra remains; `regime-research` adds LightGBM ≥4.5, PyTorch ≥2.6
+and Optuna ≥4.0. Registry availability is checked against installed packages and
+missing dependencies produce explicit refusals. Bayesian search also requires
+Optuna. No model is silently substituted for an unavailable one.
+
+**Why.** The interface must distinguish state discovery, supervised classification,
+forecasting and structural detection. Segment IDs are not recurring market states,
+and deterministic outputs must not acquire invented probabilities. Capability
+claims apply to the combinations actually exposed by `registry.py`.
+
+**Where.** `backend/app/services/regimes/{registry,estimators,hmm,structural,neural}.py`,
+`backend/pyproject.toml`; all-model and numerical evidence in §137.
+
+## §133 · D9 owns independent experiments, target definitions and bounded optimization
+
+**Decision.** D9 exposes the following eight subsections. Its output is a candidate
+or search record; fitting does not itself approve deployment.
+
+| Substep | Current items and behavior |
+| --- | --- |
+| D9.1 Baseline Models | Four deterministic methods in §132; prepared column bindings and thresholds. Indicator periods remain in C5. |
+| D9.2 Unsupervised Models | Four HMM variants, K-Means/GMM and separately described PELT/CUSUM structural methods. |
+| D9.3 Supervised Models | Logistic Regression, XGBoost, LightGBM, LSTM/GRU; target source, objective, horizon, availability lag and conditional training controls. |
+| D9.4 Hybrid Models | Earlier HMM teacher fit, later student training from filtered teacher targets; current-state imitation or future-state forecasting. |
+| D9.5 State Configuration & Discovery | Fixed/automatic count, candidate counts, templates, minimum occupancy and experiment seed. |
+| D9.6 Hyperparameter Optimization | Manual, grid, random, Bayesian and Optuna; JSON parameter-to-candidate arrays and model-compatible selection criteria. |
+| D9.7 Model Fitting & Training | Individual fits or staged independent experiments; jobs, progress/status, errors, elapsed time and saved configurations/models. |
+| D9.8 Training Results | Trial/experiment tables, actual diagnostics and convergence where available, learned parameters, assignments/probabilities/distances, exports and D10 handoff. |
+
+**Counts and semantics.** `StateConfig` defaults to fixed count 3, automatic
+candidates `[2, 3, 4]`, minimum occupancy 0.01 and criterion BIC. Applicable counts
+are 2–12. UI templates are statistical, two-state, Bull/Bear/Sideways (3), four-state,
+Trend × Volatility (6), and custom. They configure counts; they do not force hidden
+states to earn a label. Baseline counts are fixed by their rules, supervised counts
+come from the observed training target vocabulary, and structural segment counts
+are not optimized as recurring states. Minimum training occupancy rejects HMM and
+clustering candidates; it is not a universal gate for all 18 methods.
+
+**Selection criteria.** HMM count/search selection offers AIC/BIC; K-Means offers
+silhouette, Davies–Bouldin and Calinski–Harabasz; GMM offers both sets. Supervised
+and hybrid searches offer validation accuracy/log loss. HMM assignments also receive
+geometric separation diagnostics, but those are not HMM registry search objectives.
+Stability and economic interpretation are assessed separately in D10, not invented
+as additional optimizer objectives. Unsupported method/criterion pairs are refused.
+
+**Target contract.** `Target.source` is `column`, `rules` or hybrid-only `teacher`.
+Column targets require an existing label column excluded from predictive features;
+rule targets use an existing numeric feature with explicit lower/upper thresholds.
+`objective` is `current` or `future`; `horizon` defaults to 1 (1–1,000) and applies
+only to future prediction; `availability_lag` defaults to 0 (0–1,000).
+`training_pairs` excludes origins whose label time plus availability lag crosses
+the training end. Predictive scoring applies the corresponding partition boundary.
+Sequence inputs end at their origin; no future input window is constructed.
+
+The hybrid fits its teacher on the earlier fraction of training observations and
+trains its student on later filtered state assignments, never smoothed/Viterbi
+targets. Teacher agreement measures imitation, not independent economic validity.
+The teacher's preprocessing still has the cutoff defect F2; external target
+provenance and the truth of a declared availability lag are not automatically proven.
+Target completeness also has defect F4. These qualify, rather than erase, the
+implemented chronological pairing rules.
+
+**Search execution.** Manual is the default. A nonmanual search requires a nonempty
+space of supported parameters, each with at most 30 candidate values. Grid search
+refuses more than 100 fits; random/Bayesian/Optuna have `trials=12` by default,
+bounded to 1–100. Random search uses the experiment seed. Both Bayesian and Optuna
+run Optuna's seeded TPE sampler over discrete candidate values in a local study;
+they are two UI choices for this sampler, not two different optimization engines.
+
+Selection uses training likelihood/separation or a separate C6 validation span
+for predictive objectives. It does not read test scores to choose a trial.
+Successful candidates are saved independently; failed trials retain reasons in a
+completed search report, and an all-failed search raises a validation failure.
+The original research/search configuration is retained for fold-local reruns.
+Researcher selection after inspecting D10 test comparisons is not an untouched
+holdout guarantee.
+
+**Outputs.** Assignments retain timestamp, state ID, split (`train`, `val`, `test`
+or `unused`), estimate scope, supported `probability_k`/`distance_k` columns and
+change alerts. PELT scope is explicitly retrospective. Saved diagnostics include
+method-specific convergence, likelihood/loss history, parameters, occupancy and
+execution time where available, rather than a universal synthetic training score.
+
+**Where.** `contracts.py`, `experiments.execute`, `candidate`, `assignments`,
+`estimators.training_pairs`, `fit`, `neural.py`, `Discovery.tsx`.
+
+## §134 · D10 evaluates, labels, validates and records researcher approval
+
+**Decision.** Evaluation belongs in D10 and uses the actual saved experiment and
+its data contract. The seven sections are:
+
+| Substep | Current items and behavior |
+| --- | --- |
+| D10.1 Model Diagnostics | Train/validation/test views; saved fit/convergence diagnostics, compatible separation/predictive scores and held-out likelihood where supported. |
+| D10.2 State Analysis | Counts, occupancy, mean/median returns, sample return volatility, skewness, excess kurtosis, downside deviation, episode maximum drawdown, supplied ADX/RSI means, feature profiles and observed durations. |
+| D10.3 Regime Labeling | Automatic, template or manual/custom state-ID-to-label mapping; original model IDs are preserved. |
+| D10.4 Transition & Persistence | Empirical transition counts/probabilities, fitted HMM transition probabilities where available, expected/empirical durations, switching frequency, entry/exit events and timeline. |
+| D10.5 Stability & Robustness | Independent refits varying seeds, counts, feature sets, parameters, training fractions and initializations; Hungarian overlap alignment and permutation-invariant Adjusted Rand Index (ARI). |
+| D10.6 Walk-Forward Validation | Frozen-candidate chronological evaluation or model refits under existing C6 expanding/rolling plans; per-fold prepared datasets, selected parameters/counts and state distribution drift. |
+| D10.7 Model Comparison | Side-by-side fit, separation, economic-profile availability, persistence, available stability/predictive metrics, runtime and validation records; approval with validation ID and rationale. |
+
+**Metric definitions.** AIC/BIC use fitted likelihood and model parameter count.
+Separation uses scikit-learn, requires at least two nonempty states with within-state
+replication, and samples at most 3,000 rows for silhouette with a fixed seed.
+Predictive results include accuracy, balanced accuracy, macro F1, log loss, unknown
+target counts and the count used for log loss. No probabilities/likelihood criteria
+are fabricated for baselines, K-Means or structural detectors.
+
+State economics are descriptive original-unit statistics; ADX/RSI and volatility
+inputs are carried. Missing inputs yield unavailable values. Drawdown compounds
+returns within contiguous state episodes; its current assumption of simple returns
+is incorrect for supplied log returns (F5). Boundary episodes are marked censored,
+and empirical duration means include their observed portions. Expected duration is
+`1 / (1 - p_kk)`, using the fitted HMM matrix if present, otherwise empirical
+transitions; undefined/absorbing cases return null. Unassigned rows currently produce
+inconsistent occupancy denominators across reports (F8).
+
+**Labeling.** `LabelRequest` defaults to automatic/trend. Templates are `trend`,
+`trend_volatility`, `volatility` and `stress`. Training-state mean return above/below
+±0.1 × its return volatility yields Bullish/Bearish, otherwise Sideways. High/Low
+Volatility compares the state's volatility with the median across available states;
+Stress requires bearish and above-median volatility. Missing statistical inputs
+leave `State k`. Manual mappings require a nonempty label for every original ID.
+Multiple states may legitimately share a semantic label. Approval copies the map.
+
+**Robustness controls.** Defaults are seeds `[7, 42, 123]` and training fractions
+`[1.0]`. Up to 10 seeds, 8 counts, 8 feature sets, 8 configurations and 8 training
+fractions may be specified, plus random/K-Means initializations. The executor caps
+the assembled request at 40 independent refits, reports incompatible variants,
+and refuses hidden-state stability analysis for structural segment numbering.
+
+**Validation contract.** `ValidationRequest.mode` is chronological (default),
+expanding or rolling. Walk-forward requires the matching saved C6 plan and can bind
+`prepared_datasets` by fold. Each fold refits its model; search/count selection is
+rerun inside the fold when configured. Preprocessing must already have been fitted
+upstream for the fold and is verified, not refitted by D. Positive tests with
+distinct C7/C8 artifacts for every fold and combined nested optimization remain
+missing; alignment across different preprocessing representations has defect F11.
+
+Approval requires a causal validation record referencing that exact experiment
+and a rationale of 5–4,000 characters; PELT is refused. This is a research approval,
+not a guarantee of predictive sufficiency: the current raw test-row check can accept
+zero usable forecasting pairs (F3). Comparisons allow 1–20 experiment IDs and expose
+contract compatibility; they do not provide a universal economic winner.
+
+**Visualizations.** State-colored original prices, returns and supplied-volatility
+distributions, state profiles, feature heatmaps, occupancy, transitions, durations
+and convergence use computed data. Evaluation charts sample at most 2,500 display
+rows; statistical calculations and exports retain their underlying observations,
+subject to the separate silhouette sampling rule above.
+
+**Where.** `evaluation.reopen`, `evaluate`, `summarize`, `label`, `validate`,
+`robustness`, `approve`, `compare`; `metrics.py`; `Evaluation.tsx`, `charts.tsx`.
+
+## §135 · D11 uses approved versions and separates live filtering from retrospective decoding
+
+**Decision.** Deployment binds a D10 approval and a compatible submitted dataset.
+Changing asset, timeframe or feature configuration requires a separate trained and
+approved version. D11's eight sections are:
+
+| Substep | Current items and behavior |
+| --- | --- |
+| D11.1 Model Deployment | Approval/model version, compatible observation dataset, prepared/replay input mode and optional timezone-aware `as_of` origin. |
+| D11.2 Regime Inference | Raw and confirmed state IDs; genuine HMM/class probabilities, K-Means distances or structural alerts as supported. |
+| D11.3 Filtering & Smoothing | Forward filtering by default; HMM forward-backward smoothing, fixed-lag smoothing and Viterbi explicitly retrospective. |
+| D11.4 Transition Detection | State changes, probability threshold and hysteresis where supported, minimum persistence, confirmation events and delay. |
+| D11.5 Current Regime Dashboard | Current label/raw/confirmed state, available trend/volatility descriptors, duration, previous state, last transition, confidence, probabilities/distances, model/version, observation, availability and inference timestamps. |
+| D11.6 Historical Visualization | Regime-colored price, timeline, probabilities, transition events, duration distributions, frequency and transition matrix; saved paged history. |
+| D11.7 Monitoring & Alerts | Computed regime changes, low confidence, unusual observations, feature/state drift, optional CUSUM alerts and realized-target performance monitoring. |
+| D11.8 Output & Integration | Saved inference record, JSON, CSV assignments, dependency ZIP, model metadata, label mapping and reusable API. |
+
+**Inference controls.** `approval_id` and `dataset_id` are required. Defaults:
+`input_mode="prepared"`, `decoding="filter"`, `lag=5` (1–100),
+`minimum_persistence=3` (1–1,000), `probability_threshold=0.55`,
+`hysteresis=0.1`, `low_confidence=0.5`, `drift_threshold=0.2` and no optional
+`cusum_threshold`. Probability controls range 0–1; drift must be >0 and ≤1;
+an enabled CUSUM threshold must be positive. Conditional UI controls avoid
+irrelevant probability/decoding settings for incompatible models.
+
+`infer` reopens the experiment and checks its approval's model checksum and data/
+preprocessing contract. Asset, timeframe and market type must match. Inputs are
+cut at completed-bar availability before feature extraction or fitted replay;
+`as_of` must have a timezone and cannot be in the future. Explicit `close_time`
+is used as availability when supplied, otherwise timeframe duration is added to
+the observation timestamp. This fallback is not an exchange-session calendar.
+
+The saved training prefix plus complete submitted post-training history is replayed
+to maintain HMM/sequence context. Required saved timestamps cannot be omitted.
+Overlapping observation values are not currently compared, so revised saved history
+is accepted (F6); the former blanket “changed observations are refused” claim is
+incorrect. This implementation has no incremental inference checkpoints.
+
+Forward filtering uses observations through each origin with frozen fitted model
+parameters. Smoothing, fixed-lag smoothing and Viterbi use later observations within
+their selected history and are marked retrospective. A future-objective classifier
+is a forecast, not a live current-regime estimate. These estimator distinctions do
+not repair upstream leakage such as F1/F2.
+
+Transition confirmation records an event when its persistence/probability conditions
+are satisfied, without backdating it. Confidence is the confirmed state's probability,
+not necessarily the largest probability. Confirmation delay describes this rule's
+lag, not the time since an independently known economic change. Unassigned gaps
+currently preserve pending confirmation and undercount elapsed delay (F12).
+
+**Monitoring calculations.** Recent features (up to 250 rows) are compared with
+training-quantile histograms using squared Jensen–Shannon distance (divergence,
+base 2); constant references use the fraction outside a three-standard-deviation
+tolerance. An unusual observation exceeds five training standard deviations in at
+least one feature. State occupancy drift uses Jensen–Shannon divergence; low
+confidence and drift warnings use the configured thresholds. CUSUM events come
+from the sequential detector. Supervised accuracy deterioration is reported when
+it falls more than 10 percentage points below the approved test reference.
+
+Realized targets are required for performance monitoring; an absent target column
+is unavailable, while partially missing targets currently abort inference (F4).
+Dashboard trend/volatility descriptors are extracted from recognized label words
+and may be unavailable for custom labels. Saved-result reopening has UI context
+defect F7. Monitoring is computed per submitted run; market subscriptions, external
+alert delivery and automatic retraining are not implemented.
+
+**Where.** `inference.infer`, `confirm`, `feature_drift`; `hmm.HMM.predict`;
+`Inference.tsx`, `charts.tsx`; request bounds in `contracts.Inference`.
+
+## §136 · Persist project-scoped experiment, validation, approval and inference artifacts
+
+**Decision.** The active project's `outputs/regimes/{ULID}/` contains immutable
+records with catalog-anchored manifest integrity. Record kinds are `experiment`,
+`search`, `labels`, `validation`, `robustness`, `approval` and `inference`.
+Experiment bundles include `manifest.json`, `model.bin` and `assignments.parquet`.
+
+Manifests retain resolved configuration and original research/search configuration,
+feature order, seed, training bounds, data/preprocessing checksums, embedded fitted
+preprocessing, readable fitted parameters, complete assignments, diagnostics and
+runtime versions (engine `regimes-v1` and installed numerical/ML packages).
+Approval pins experiment/version, validation, rationale, exact model checksum,
+contract, label map and current/future objective. Label edits do not mutate a
+previous approval's mapping.
+
+**HTTP contract.** Paths below are relative to `/api/regime`.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /options?dataset_id=…` | Registry capabilities, columns, plans and encountered preprocessing |
+| `GET /plans/{id}` | Existing C6 spans |
+| `POST /experiments` | Fit/search job |
+| `GET /experiments/{id}/evaluation` | Computed D10 report |
+| `POST /experiments/{id}/labels` | Save mapping (201) |
+| `POST /experiments/{id}/validation` | Chronological/walk-forward job |
+| `POST /experiments/{id}/robustness` | Independent refit job |
+| `POST /experiments/{id}/approval` | Save researcher approval (201) |
+| `POST /comparison` | Side-by-side candidate comparison |
+| `POST /inference` | Approved inference job |
+| `GET /artifacts?kind=experiment` | List a supported record kind |
+| `GET /artifacts/{id}` | Verified manifest |
+| `GET /artifacts/{id}/history?offset=0&limit=2500` | Paged assignments, maximum page size 5,000 |
+| `GET /artifacts/{id}/export?format=json` | Metadata plus full history when present; `format=csv` exports assignments |
+| `GET /artifacts/{id}/bundle` | ZIP with stored files and referenced dependency manifests |
+
+Long-running fit, validation, robustness and inference requests use the existing
+HTTP 202 job/poll interface and application error handling. API clients use the
+existing project context (`X-Project-Id`); download URLs carry `project_id`.
+The service interface is `RegimeService` in the same application context.
+
+**Why.** A deployable model must be traceable to the exact inputs, preprocessing,
+labels and validation reviewed by the researcher. Persisted identity is stronger
+than remembering the latest selected model in a page control.
+
+**Limits.** ZIPs do not include original market datasets or application source;
+retain the source dataset snapshot and compatible runtime for reproduction.
+There is no arbitrary uploaded-pickle/model deserialization endpoint. File integrity
+does not prove correct methodology or resolve the input-history revision gap F6.
+Legacy D artifacts are retained research records, not implicitly migrated approvals.
+
+**Where.** `artifacts.py`, `service.py`, `experiments.runtime_versions`,
+`evaluation.approve`, `inference.infer`, `backend/app/routers/regimes.py`.
+
+## §137 · Record verification evidence and unresolved audit findings without overstating coverage
+
+**Decision.** Preserve implementation results as dated evidence, qualify them with
+the independent technical audit, and distinguish tested behavior from assumptions.
+This documentation reconciliation is not another backend/frontend/browser test run
+and does not fix the audit defects.
+
+| Evidence recorded on 2026-11-04 | Scope and qualification |
+| --- | --- |
+| Full backend: 1,416 passed, 8 skipped | Rerun during the audit; includes upstream regressions. Passing totals do not refute untested defects. |
+| D backend: 44 passed | 15 numerical cases, 22 workflow cases and 7 API/search/walk-forward cases across the three regime test files. |
+| Full frontend: 67 passed across 12 files | Rerun during the audit. D-specific coverage is four mocked-control tests; charts are mocked. |
+| Backend mypy: 67 source files; frontend typecheck/build; targeted Ruff | Passing results recorded during implementation, not rerun by this documentation merge. |
+| Real BTCUSDT browser workflow | Saved report records 2,131 daily observations, standard-scaled `close`, two-state Gaussian HMM, D9 fit → D10 chronological validation/approval → D11 prepared filtering; no browser errors. |
+| Independent numerical probes during the audit | Gaussian one-step EM matched enumerated posterior calculations within 3.4e−16; fixed-df Student-t mean/scale update and Gaussian-mixture log density matched independent formulas. These are reported audit probes, not newly added regression tests. |
+| Export probe during the audit | Persisted 48-row Gaussian JSON/CSV matched the inference frame (CSV tolerance 1e−14); ZIP included model and approval/validation manifests. |
+
+**Relevant tests and what they establish.**
+
+- `backend/tests/test_regimes_numerics.py`: `test_forward_matches_enumerated_paths`,
+  `test_emissions_match_scipy`, `test_hmm_fits_reproducibly_and_filter_is_prefix_invariant`,
+  `test_smoothing_and_viterbi_agree_with_bruteforce`,
+  `test_pelt_matches_exhaustive_valid_partitions`,
+  `test_cusum_prefix_and_transition_confirmation`, and
+  `test_label_switching_and_transition_estimates`. These cover small reference
+  calculations, covariance variants and selected causal properties, not all
+  numerical scales or statistical identification.
+- `backend/tests/test_regimes_workflow.py`:
+  `test_each_model_executes_real_training_and_persisted_predictions` exercises all
+  18 entries and persistence; it mainly proves execution and reload consistency.
+  `test_end_to_end_validation_labels_approval_inference_and_prefix` covers the
+  Gaussian workflow/cutoff; `test_c8_pca_fitted_artifacts_replay_without_refitting`
+  covers simple actual PCA; `test_full_dataset_scaling_refused_and_integrity_tampering_detected`
+  covers the direct scaler path and tampering;
+  `test_automatic_count_selection_and_incompatible_metrics` covers count search
+  and incompatible criteria. Recurrent assertions check loss-history length and
+  stored recurrent-weight keys, not that training learned temporal structure.
+- `backend/tests/test_regimes_api.py`:
+  `test_api_complete_workflow_and_project_isolation`,
+  `test_real_optimization_backends` (grid/random/Bayesian/Optuna), and
+  `test_walk_forward_reuses_c6_and_refuses_leaking_preprocessing` (expanding/rolling).
+  The positive walk-forward case is manual unscaled K-Means; the scaler case tests
+  refusal, not successful distinct fold-specific preprocessing.
+- `frontend/src/pages/regimes/Regimes.test.tsx`: conditional model/target controls,
+  staged experiment payload, approval disabled before validation, and default causal
+  inference/incompatible control hiding. These are not full browser model tests.
+- `backend/tools/verify_regimes_browser.py` and
+  [saved browser report](artifacts/regime-rebuild/verification.json): BTCUSDT Gaussian
+  workflow, exports, subsection navigation, light/dark themes and compact layout
+  were recorded during implementation. The audit did not rerun this driver. The
+  saved snapshot has no transition and ends at the 2026-11-01 observation; it does
+  not prove hysteresis or detection delay works across all cases.
+
+**Upstream integration status.** Actual C6 and standard C7 artifacts are exercised.
+C5 feature columns in the D fixture are manually constructed; a real C5 → D test
+is missing. The simple C8 test uses a new C6 plan on the scaled dataset because
+C8 currently requires direct-parent agreement. Complex C7/C8 replay, successful
+fold-specific C7/C8 inputs and nested optimization with walk-forward remain
+unverified. Equity/session timing, multiclass coverage, probability hysteresis and
+drift calibration also need stronger D-specific tests. Neither a registry entry
+nor a passing serialization test establishes independent economic validity.
+
+**Open defects from the technical audit.** IDs are retained for follow-up. None is
+represented as fixed by this record.
+
+| ID / priority | Identified defect and consequence | Implementation reference |
+| --- | --- | --- |
+| F1 / P1 | Secondary merged input bypasses preprocessing leakage checks. An actual full-dataset C7-scaled secondary source merged into a raw primary was accepted by D with an empty preprocessing contract. | `data.preprocessing`; `backend/app/storage/catalog.py: ancestors` follows primary parents; B4 records additional parents separately. |
+| F2 / P1 | Hybrid preprocessing is checked against global training end rather than the earlier teacher cutoff. A teacher ending 2024-01-03 07:00 UTC accepted C7 fitted through 2024-01-05 15:00 UTC. This invalidates teacher-origin preprocessing causality; it alone does not demonstrate final test leakage. | `estimators.fit` hybrid branch; `data.check_preprocessing`. |
+| F3 / P1 | Validation/approval can succeed with zero usable forecasting pairs: horizon 30 against a 24-row test span reports unavailable predictive metrics but still permits approval. | `evaluation.validate`, `approve`; `metrics.predictive`. |
+| F4 / P1 | Partially missing realized targets abort live inference. Target validation scans the entire frame before selecting eligible labels; final NaNs can also invalidate earlier work. | `estimators.target_values`; `metrics.predictive`; `inference.infer` monitoring branch. |
+| F5 / P2 | Supplied log returns are compounded as simple returns. Two returns `log(0.5)` should yield −75% drawdown; the current calculation yields about −90.5841%. No return-kind contract resolves this. | `metrics.economic_columns`, `profiles`. |
+| F6 / P2 | Replayed saved-history values can be revised while timestamps remain present; a probe changed 40 historical assignments. The documentation's prior refusal guarantee was too strong. | `inference.infer`, saved-history presence checks. |
+| F7 / P2 | Opening saved inference does not synchronize approval/dataset/decoder controls, so displayed results and request/example context can disagree. Code-inspection finding, not a fresh browser reproduction. | `frontend/src/pages/regimes/Inference.tsx: opened`. |
+| F8 / P2 | State-profile occupancy divides by all rows, while occupancy/drift divides by assigned rows; `[-1,-1,0,1,1]` yields conflicting proportions. | `metrics.profiles`, `occupancy`. |
+| F9 / P2 | PELT cumulative-square subtraction loses precision on large offsets. Shifting `[0,1,2,0,1,2]` by 1e12 changed one-segment SSE from 4 to 0. | `structural.pelt` segment-cost calculation. |
+| F10 / P2 | Optional regime E2E test invokes deleted `tools/e2e_regime.py`. Ordinary execution skips it; enabling `QM_E2E=1` would expose the missing driver. | `backend/tests/test_e2e_live.py: test_regime_endpoints`. |
+| F11 / P2 | Walk-forward alignment applies the reference model to fold-transformed inputs without ensuring equivalent preprocessing representations. The alignment algorithm itself is sound; its use here is not. Code-inspection finding. | `evaluation.validate`, `model.predict(data.x[train])`. |
+| F12 / P3 | Unknown-state gaps retain pending persistence and undercount elapsed confirmation delay; `[0,1,-1,1]` with minimum 2 confirms with reported delay 1 despite two elapsed bars. | `inference.confirm`. |
+| F13 / P3 | Registry permits `neutral_band=0`, but the resulting equal lower/upper thresholds are rejected by the baseline algorithm. | `registry.MODELS["moving_average"]`; `estimators.baseline`, `rule_labels`. |
+
+**Further limits.** PELT is L2-only/offline; interactive D10 analysis is bounded
+to 100 segments. Student-t df is fixed. Search is discrete TPE rather than a
+separate Gaussian-process optimizer. Recurrent training is CPU-based. Additional
+emissions, persistent HMM topology constraints, other hybrid combinations, live
+subscriptions, external alert delivery and incremental inference checkpoints are
+not implemented. Statistical approval does not certify profitability.
+
+Eight optional existing E2E tests skip unless `QM_E2E=1` starts their servers/browser;
+F10 means they cannot all be described merely as available but unrun. Existing
+large frontend bundle warnings remain recorded. The parent-requested Graphify CLI
+is unavailable; source inspection was used during this reconciliation.
+
+## §138 · Keep documentation traceable to both source records and current evidence
+
+**Decision.** The replacement file's 17 numbered principles are integrated as
+follows, so none of its substantive D decisions disappears in the restoration:
+
+| Replacement-file item | Integrated decision(s) |
+| --- | --- |
+| 1. Preserve A1–C8 | §§129, 131 |
+| 2. Requested step boundaries | §§129–130, 133–135 |
+| 3. Existing architecture | §130 |
+| 4. Actual capabilities | §§132–135, 137 |
+| 5. Separate structural detection | §§132, 134–135 |
+| 6. Genuine estimators | §132 |
+| 7. Targets and purged boundaries | §133; F2/F4 qualifications in §137 |
+| 8. Verify preprocessing | §131; F1/F2/F11 and missing integration evidence in §137 |
+| 9. IDs separate from labels | §§133–134 |
+| 10. Metric meaning | §134; F5/F8 qualifications in §137 |
+| 11. Test excluded from optimization | §§133–134; nested-validation evidence limits in §137 |
+| 12. Immutable artifacts | §136 |
+| 13. Approval in D10 | §§134, 136; F3 qualification in §137 |
+| 14. Causal inference default | §135; F6/F12 qualifications in §137 |
+| 15. Computed monitoring | §135; F4 qualification in §137 |
+| 16. Integration constraints | §§131, 135, 137 |
+| 17. Preserve stored research | §§129, 136 |
+| Decision 18. Adopt/document rebuilt workflow | §129, expanded by §§130–137; existing link anchor retained |
+
+**Documentation contract.** [README.md](README.md#module-d--regime-detection)
+provides the user-facing inventory; [context.md](context.md) records architecture
+and runtime context; [docs/module-d.md](docs/module-d.md) supplies the operating/API
+reference; [docs/architecture.md](docs/architecture.md) shows the full flow.
+These companion documents were not edited in this reconciliation. Where their
+implementation-era guarantees exceed the evidence, §137 records the qualification;
+the files should be reconciled with verified fixes in a subsequent authorized pass.
+
+**Preservation rule.** Future changes should append decisions or add explicit dated
+supersession notes. Do not delete prior decisions, renumber unrelated history, or
+silently turn a planned capability into an implemented claim. Original backup
+wording, including older limitations and test outcomes, remains historical evidence.
+
+<!-- d-rebuild-additions:end -->

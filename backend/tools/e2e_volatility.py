@@ -718,8 +718,9 @@ check(
     str(columns_of(preview_of(job))),
 )
 check(
-    "the forecast lands in outputs, as the product of an analysis rather than an input",
-    output_meta.get("category") == "outputs" and output_meta.get("operation") == "volatility",
+    "the forecast lands in forecast_data, as the product of a forecasting module",
+    output_meta.get("category") == "forecast_data"
+    and output_meta.get("operation") == "volatility",
     f"category={output_meta.get('category')} operation={output_meta.get('operation')}",
 )
 check(

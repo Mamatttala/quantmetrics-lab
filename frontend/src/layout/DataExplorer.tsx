@@ -1,51 +1,34 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import { ApiError, api } from "@/api/client";
 import { notifyDatasetsChanged, subscribeToDatasets } from "@/api/datasetsChanged";
+import { getActiveProjectId } from "@/api/projectSelection";
+import { useResizablePane } from "./useResizablePane";
+import { Description } from "@/components/Description";
 import {
   CATEGORY_LABELS,
   CATEGORY_ORDER,
+  OPERATION_LABELS,
   type DatasetCategory,
   type DatasetSummary,
+  type Project,
 } from "@/api/types";
-import { ThemeToggle } from "@/components/ThemeToggle";
 
 interface DataExplorerProps {
+  project: Project | null;
+  projectControls: ReactNode;
   onHide: () => void;
-}
-
-/** Width limits for the drag-to-resize handle (§1: min 200, max 500). */
-const MIN_WIDTH = 200;
-const MAX_WIDTH = 500;
-const DEFAULT_WIDTH = 280;
-const WIDTH_KEY = "qca.ui.explorerWidth";
-
-function clampWidth(value: number): number {
-  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, value));
-}
-
-function readStoredWidth(): number {
-  try {
-    const raw = window.localStorage.getItem(WIDTH_KEY);
-    const parsed = raw === null ? Number.NaN : Number(raw);
-    return Number.isFinite(parsed) ? clampWidth(parsed) : DEFAULT_WIDTH;
-  } catch {
-    // localStorage throws in private windows; a layout preference is not worth a
-    // blank pane, so the default is used instead.
-    return DEFAULT_WIDTH;
-  }
 }
 
 /**
  * Data Explorer — the tree pane between the sidebar and the main content.
  *
  * A dark-navy tree of the catalog, grouped by category. Clicking a dataset opens it
- * in Data Management; the row also keeps the small, high-frequency actions close to
- * the dataset they affect without making the row's navigation ambiguous.
+ * in Data Management; rename and delete remain available beside each dataset.
  */
-export function DataExplorer({ onHide }: DataExplorerProps) {
+export function DataExplorer({ project, projectControls, onHide }: DataExplorerProps) {
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +37,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
   // the backend answered, and announcing "Backend unreachable" over that message sends
   // the user to check a server that is running fine.
   const [unreachable, setUnreachable] = useState(false);
-  const [width, setWidth] = useState<number>(readStoredWidth);
+  const { width, resizeHandleProps } = useResizablePane("qca.ui.explorerWidth", 280);
   const navigate = useNavigate();
 
   // `useParams` is deliberately not used here. DataExplorer renders inside the
@@ -69,12 +52,9 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
     return match?.[1] ?? null;
   }, [pathname]);
   const fileInput = useRef<HTMLInputElement>(null);
-  const resize = useRef<{ startX: number; startWidth: number } | null>(null);
-  // Mirrors `width` so the resize handler reads the live value without being rebuilt
-  // (and re-bound) on every pointer move.
-  const widthRef = useRef(width);
 
   const refresh = useCallback(async () => {
+    if (!project) return;
     setStatus("loading");
     try {
       const rows = await api.listDatasets();
@@ -89,7 +69,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
       setUnreachable(cause instanceof ApiError && cause.code === "transport_error");
       setStatus("error");
     }
-  }, []);
+  }, [project]);
 
   useEffect(() => {
     void refresh();
@@ -99,15 +79,6 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
   // would leave the list stale until Refresh was pressed. This pane's own mutations
   // (upload, per-row mutations, delete all) refresh directly and do not need the signal.
   useEffect(() => subscribeToDatasets(() => void refresh()), [refresh]);
-
-  useEffect(() => {
-    widthRef.current = width;
-    try {
-      window.localStorage.setItem(WIDTH_KEY, String(width));
-    } catch {
-      /* preference not persisted; not worth surfacing */
-    }
-  }, [width]);
 
   const handleRename = async (dataset: DatasetSummary) => {
     const proposed = window.prompt("New name", dataset.name);
@@ -140,33 +111,11 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
     }
   };
 
-  const openQuickAction = (event: ReactMouseEvent<HTMLButtonElement>, path: string) => {
-    event.stopPropagation();
-    navigate(path);
-  };
-
-  const startResize = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    resize.current = { startX: event.clientX, startWidth: widthRef.current };
-    const onMove = (move: globalThis.MouseEvent) => {
-      const state = resize.current;
-      if (state === null) return;
-      setWidth(clampWidth(state.startWidth + move.clientX - state.startX));
-    };
-    const onUp = () => {
-      resize.current = null;
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, []);
-
   const handleDeleteAll = async () => {
     if (datasets.length === 0) return;
     const confirmed = window.confirm(
-      `Delete all ${datasets.length} dataset(s)?\n\nThis removes every catalog entry ` +
-        `and its Parquet file from the Data Explorer. This cannot be undone.`,
+      `Delete all ${datasets.length} dataset(s) in "${project?.name}"?\n\n` +
+        `This removes this project's datasets and their Parquet files. This cannot be undone.`,
     );
     if (!confirmed) return;
     setStatus("loading");
@@ -187,6 +136,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
     try {
       const uploaded = await api.uploadCsv(file);
       await refresh();
+      if (getActiveProjectId() !== project?.project_id) return;
       navigate(`/data/${uploaded.dataset_id}`);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : String(cause));
@@ -199,10 +149,17 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
   // folded away; default state per the redesign spec is expanded.
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
 
-  const grouped = CATEGORY_ORDER.map((category: DatasetCategory) => ({
-    category,
-    rows: datasets.filter((d) => d.category === category),
-  }));
+  const grouped = CATEGORY_ORDER.map((category: DatasetCategory) => {
+    const rows = datasets.filter((d) => d.category === category);
+    const operations = new Map<string, DatasetSummary[]>();
+    for (const row of rows) {
+      const operation =
+        row.operation ??
+        (category === "raw_data" ? "fetch" : category === "uploaded_data" ? "upload" : "table");
+      operations.set(operation, [...(operations.get(operation) ?? []), row]);
+    }
+    return { category, rows, operations: [...operations.entries()] };
+  });
 
   const toggleFold = (category: string) => {
     setFolded((prev) => {
@@ -218,6 +175,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
 
   return (
     <aside className="explorer" style={{ width }}>
+      {projectControls}
       <div className="explorer__header">
         <span className="explorer__title">Data Explorer</span>
         <div className="explorer__toolbar">
@@ -225,6 +183,7 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
             type="button"
             className="explorer__btn"
             onClick={() => fileInput.current?.click()}
+            disabled={!project}
             title="Import a CSV as an immutable uploaded_data dataset"
           >
             Upload
@@ -236,8 +195,8 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
             type="button"
             className="explorer__btn explorer__btn--danger"
             onClick={() => void handleDeleteAll()}
-            disabled={datasets.length === 0}
-            title="Remove every dataset from the Data Explorer"
+            disabled={!project || datasets.length === 0 || status === "loading"}
+            title="Remove every dataset in the selected project"
           >
             Delete
           </button>
@@ -245,11 +204,11 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
             type="button"
             className="explorer__btn"
             onClick={() => void refresh()}
+            disabled={!project}
             title="Reload the dataset list"
           >
             Refresh
           </button>
-          <ThemeToggle />
           <input
             ref={fileInput}
             type="file"
@@ -267,6 +226,16 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
       </div>
 
       <div className="explorer__body">
+        {project && <details className="explorer__project" open>
+          <summary className="explorer__project-name" title={project.name}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="1.6" aria-hidden="true">
+              <path d="M3 7V5h6l2 2h10v12H3Z" />
+            </svg>
+            <span>{project.name}</span>
+            <span className="explorer__count">{datasets.length}</span>
+          </summary>
+        {status === "loading" && <div className="explorer__empty" role="status">Loading datasets…</div>}
         {status === "error" && (
           <div className="explorer__empty">
             {unreachable ? "Backend unreachable." : "That did not work."}
@@ -277,11 +246,14 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
 
         {status === "ready" && datasets.length === 0 && (
           <div className="explorer__empty">
-            No datasets yet. Fetch one from Raw Data Fetch (A1).
+            No datasets in this project yet.
+            <Description anchor=".explorer__empty">
+              Upload a CSV or fetch data from Raw Data Fetch (A1).
+            </Description>
           </div>
         )}
 
-        {grouped.map(({ category, rows }) =>
+        {grouped.map(({ category, rows, operations }) =>
           rows.length === 0 ? null : (
             <div className="explorer__group" key={category}>
               <button
@@ -312,7 +284,13 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
                 }
               >
                 <div className="explorer__childreninner">
-                  {rows.map((dataset) => (
+                  {operations.map(([operation, operationRows]) => (
+                    <div className="explorer__operation" key={operation}>
+                      <div className="explorer__operation-label">
+                        <span>{OPERATION_LABELS[operation] ?? operation.replaceAll("_", " ")}</span>
+                        <span className="explorer__count">{operationRows.length}</span>
+                      </div>
+                  {operationRows.map((dataset) => (
                     <div
                       key={dataset.dataset_id}
                       className={
@@ -344,37 +322,6 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
                       <div className="explorer__actions" onClick={(event) => event.stopPropagation()}>
                         <button
                           type="button"
-                          className="explorer__quick"
-                          title="Open in Raw Data View (A2)"
-                          onClick={(event) =>
-                            openQuickAction(event, `/view/${dataset.dataset_id}`)
-                          }
-                        >
-                          view
-                        </button>
-                        <button
-                          type="button"
-                          className="explorer__quick"
-                          title="Open in Cleaning (B3)"
-                          onClick={(event) =>
-                            openQuickAction(event, `/cleaning/${dataset.dataset_id}`)
-                          }
-                        >
-                          clean
-                        </button>
-                        <button
-                          type="button"
-                          className="explorer__quick"
-                          title="Open as the base in Resample & Merge (B4)"
-                          onClick={(event) =>
-                            openQuickAction(event, `/resample/${dataset.dataset_id}`)
-                          }
-                        >
-                          merge
-                        </button>
-                        <span className="explorer__action-spacer" aria-hidden="true" />
-                        <button
-                          type="button"
                           className="icon-btn"
                           aria-label={`Rename dataset ${dataset.name}`}
                           title="Rename dataset"
@@ -400,19 +347,20 @@ export function DataExplorer({ onHide }: DataExplorerProps) {
                       </div>
                     </div>
                   ))}
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           ),
         )}
+        </details>}
       </div>
 
       <div
-        className="explorer__resize"
-        role="separator"
-        aria-orientation="vertical"
+        {...resizeHandleProps}
+        className="pane-resize explorer__resize"
         aria-label="Resize Data Explorer"
-        onMouseDown={startResize}
       />
     </aside>
   );

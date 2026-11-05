@@ -9,6 +9,7 @@ import { ThemeProvider, useTheme } from "@/theme";
 
 const tokensCss = readFileSync(resolve(process.cwd(), "src/styles/tokens.css"), "utf8");
 const globalCss = readFileSync(resolve(process.cwd(), "src/styles/global.css"), "utf8");
+const themesCss = readFileSync(resolve(process.cwd(), "src/styles/themes.css"), "utf8");
 
 function ThemeControls() {
   const { toggle } = useTheme();
@@ -43,7 +44,7 @@ describe("light theme controls", () => {
 
     const style = document.createElement("style");
     style.dataset.themeTest = "true";
-    style.textContent = `${tokensCss}\n${globalCss}`;
+    style.textContent = `${tokensCss}\n${themesCss}\n${globalCss}`;
     document.head.append(style);
   });
 
@@ -64,8 +65,8 @@ describe("light theme controls", () => {
     expect(tokensCss).toContain("--accent-dim: #b8941f;");
     expect(tokensCss).toContain("--tooltip-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);");
     expect(tokensCss).toContain("--modal-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);");
-    expect(globalCss).toContain("var(--accent-dim)");
-    expect(globalCss).toContain("stroke: var(--accent-dim);");
+    expect(themesCss).toContain("--select-arrow: var(--accent-dim);");
+    expect(globalCss).toContain("stroke: var(--select-arrow);");
     expect(globalCss).toContain("box-shadow: var(--modal-shadow);");
   });
 });
